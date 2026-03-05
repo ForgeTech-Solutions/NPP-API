@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     DOCS_USERNAME: str = "admin"
     DOCS_PASSWORD: str = "docs2025!"
 
+    # Reverse proxy prefix (e.g. /v1 when behind nginx)
+    ROOT_PATH: str = ""
+
     @model_validator(mode="after")
     def normalize_database_url(self):
         """Build a reliable DB URL for Docker and sanitize malformed values."""

@@ -108,6 +108,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
+    root_path=settings.ROOT_PATH,
     description=(
         "API pour la nomenclature nationale des produits pharmaceutiques à usage humain.\n\n"
         "## Fonctionnalités\n"
@@ -161,13 +162,15 @@ async def get_openapi(credentials: HTTPBasicCredentials = Depends(_verify_docs_c
 @app.get("/docs", include_in_schema=False)
 async def swagger_ui(credentials: HTTPBasicCredentials = Depends(_verify_docs_credentials)):
     """Swagger UI (protected)."""
-    return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{settings.APP_NAME} — Docs")
+    openapi_url = f"{settings.ROOT_PATH}/openapi.json"
+    return get_swagger_ui_html(openapi_url=openapi_url, title=f"{settings.APP_NAME} — Docs")
 
 
 @app.get("/redoc", include_in_schema=False)
 async def redoc_ui(credentials: HTTPBasicCredentials = Depends(_verify_docs_credentials)):
     """ReDoc (protected)."""
-    return get_redoc_html(openapi_url="/openapi.json", title=f"{settings.APP_NAME} — ReDoc")
+    openapi_url = f"{settings.ROOT_PATH}/openapi.json"
+    return get_redoc_html(openapi_url=openapi_url, title=f"{settings.APP_NAME} — ReDoc")
 
 
 # ── Request logging middleware ──────────────────────────────────────────

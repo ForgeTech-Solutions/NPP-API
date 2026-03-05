@@ -42,6 +42,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin2025!}
       DOCS_USERNAME: ${DOCS_USERNAME:-admin}
       DOCS_PASSWORD: ${DOCS_PASSWORD:-docs2025!}
+      ROOT_PATH: ${ROOT_PATH:-/v1}
       RECREATE_TABLES: ${RECREATE_TABLES:-false}
       DEBUG: ${DEBUG:-false}
     volumes:
