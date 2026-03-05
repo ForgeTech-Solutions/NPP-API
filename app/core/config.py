@@ -1,5 +1,6 @@
 """Application configuration settings."""
 import os
+from urllib.parse import quote_plus
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -41,8 +42,10 @@ class Settings(BaseSettings):
         running_in_docker = os.path.exists("/.dockerenv") or os.getenv("RUNNING_IN_DOCKER") == "1"
 
         if running_in_docker:
+            user = quote_plus(self.POSTGRES_USER)
+            password = quote_plus(self.POSTGRES_PASSWORD)
             self.DATABASE_URL = (
-                f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"postgresql+asyncpg://{user}:{password}"
                 f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
             )
             return self
