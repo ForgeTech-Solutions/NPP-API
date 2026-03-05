@@ -3,6 +3,7 @@ import logging
 import logging.config
 import time
 import secrets
+from datetime import datetime
 from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
@@ -186,23 +187,52 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+# Track startup time for uptime calculation
+_startup_time = datetime.utcnow()
+
+
 # Health check endpoint
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """Check API health status with last import information."""
+    """Check API health status with database stats."""
     from app.db.session import AsyncSessionLocal
     from app.models.import_log import ImportLog
-    from sqlalchemy import select
-    
+    from app.medicaments.models import Medicament
+    from sqlalchemy import select, func
+    import time as _time
+
+    now = datetime.utcnow()
+    uptime_seconds = int((now - _startup_time).total_seconds())
+    uptime_str = f"{uptime_seconds // 3600}h {(uptime_seconds % 3600) // 60}m {uptime_seconds % 60}s"
+
     response = {
         "status": "ok",
         "version": settings.APP_VERSION,
-        "derniere_mise_a_jour": None
+        "uptime": uptime_str,
+        "uptime_seconds": uptime_seconds,
+        "db_latency_ms": None,
+        "total_medicaments": None,
+        "total_laboratoires": None,
+        "derniere_mise_a_jour": None,
+        "derniere_mise_a_jour_date": None,
     }
-    
-    # Get last successful import
+
     try:
         async with AsyncSessionLocal() as session:
+            t0 = _time.monotonic()
+
+            # Total médicaments
+            total_med = await session.scalar(select(func.count()).select_from(Medicament))
+
+            # Total laboratoires distincts
+            total_labs = await session.scalar(
+                select(func.count(func.distinct(Medicament.laboratoire)))
+            )
+
+            # Latence DB
+            db_latency_ms = round((_time.monotonic() - t0) * 1000, 2)
+
+            # Dernier import réussi
             result = await session.execute(
                 select(ImportLog)
                 .where(ImportLog.end_time.is_not(None))
@@ -210,13 +240,19 @@ async def health_check():
                 .limit(1)
             )
             last_import = result.scalar_one_or_none()
-            
+
+            response["db_latency_ms"] = db_latency_ms
+            response["total_medicaments"] = total_med or 0
+            response["total_laboratoires"] = total_labs or 0
             if last_import:
                 response["derniere_mise_a_jour"] = last_import.version_nomenclature
-    except Exception:
-        # If database not ready or error, just return basic health
-        pass
-    
+                response["derniere_mise_a_jour_date"] = (
+                    last_import.end_time.isoformat() if last_import.end_time else None
+                )
+    except Exception as e:
+        response["status"] = "degraded"
+        response["db_error"] = str(e)
+
     return response
 
 
