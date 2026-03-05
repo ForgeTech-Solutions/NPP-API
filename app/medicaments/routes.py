@@ -18,9 +18,14 @@ from app.medicaments.schemas import (
 )
 from app.medicaments import crud
 from app.auth.models import User
-from app.core.security import get_current_user, get_current_admin
+from app.core.security import get_current_user, get_current_admin, require_pack, require_any_pack
 from app.core.cache import cache
 from app.db.session import get_db
+
+# Pack shorthand aliases
+_FREE_AND_UP  = require_any_pack()               # FREE / PRO / INSTITUTIONNEL / DEVELOPPEUR
+_PRO_AND_UP   = require_pack(["PRO", "INSTITUTIONNEL", "DEVELOPPEUR"])
+_INST_AND_UP  = require_pack(["INSTITUTIONNEL", "DEVELOPPEUR"])
 
 router = APIRouter(prefix="/medicaments", tags=["Medicaments"])
 
@@ -29,8 +34,11 @@ router = APIRouter(prefix="/medicaments", tags=["Medicaments"])
     "",
     response_model=PaginatedResponse[MedicamentOut],
     summary="Lister les médicaments",
-    description="Liste paginée avec recherche full-text et 15+ filtres. "
-                "Le paramètre `q` recherche dans DCI, nom de marque, code et laboratoire."
+    description=(
+        "Liste paginée avec recherche full-text et 15+ filtres.\n\n"
+        "**Pack FREE** : recherche `q`, `dci`, `nom_marque`, `code`, pagination — rate limit 100 req/j.\n\n"
+        "**Pack PRO+** : tous les filtres avancés (laboratoire, pays, type, statut, catégorie, dates…)"
+    ),
 )
 async def list_medicaments(
     page: int = Query(1, ge=1, description="Numéro de page"),
@@ -52,7 +60,7 @@ async def list_medicaments(
     sort_by: str = Query("id", description="Trier par: id, code, dci, nom_marque, laboratoire, pays_laboratoire, type_medicament, categorie, date_enregistrement_initial, created_at"),
     order: str = Query("asc", description="Ordre de tri: asc ou desc"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(_FREE_AND_UP)
 ):
     """Liste et recherche de médicaments avec pagination, filtres et tri."""
     medicaments, total = await crud.get_medicaments(
@@ -86,7 +94,7 @@ async def list_medicaments(
 async def get_statistics(
     categorie: Optional[str] = Query(None, description="Filtrer par catégorie"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(_INST_AND_UP)
 ):
     """Statistiques avec filtre optionnel par catégorie."""
     cache_key = f"stats:{categorie or 'all'}"
@@ -106,7 +114,7 @@ async def get_statistics(
 )
 async def get_dashboard(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(_INST_AND_UP)
 ):
     """Dashboard avec statistiques enrichies."""
     cached = cache.get("dashboard")
@@ -129,7 +137,7 @@ async def export_csv(
     type: Optional[str] = Query(None, alias="type", description="Filtrer par type"),
     pays_laboratoire: Optional[str] = Query(None, description="Filtrer par pays"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(_PRO_AND_UP)
 ):
     """Export CSV des médicaments avec filtres optionnels."""
     csv_content = await crud.export_medicaments_csv(
@@ -153,7 +161,7 @@ async def export_csv(
 async def get_by_dci(
     dci: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(_PRO_AND_UP)
 ):
     """Tous les médicaments d'une même DCI (molécule)."""
     medicaments, total = await crud.get_medicaments_by_dci(db, dci)
@@ -174,7 +182,7 @@ async def get_by_dci(
 async def get_medicament(
     medicament_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(_FREE_AND_UP)
 ):
     """Détail d'un médicament par ID."""
     medicament = await crud.get_medicament_by_id(db, medicament_id)

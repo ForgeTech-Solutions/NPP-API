@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Admin (initial user)
     ADMIN_EMAIL: str = "admin@nomenclature.dz"
     ADMIN_PASSWORD: str = "Admin2025!"
+
+    # Docs protection (HTTP Basic Auth on /docs, /redoc, /openapi.json)
+    DOCS_USERNAME: str = "admin"
+    DOCS_PASSWORD: str = "docs2025!"
     
     model_config = SettingsConfigDict(
         env_file=".env",

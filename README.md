@@ -4,7 +4,10 @@ API REST pour la gestion de la **nomenclature nationale des produits pharmaceuti
 
 ## Fonctionnalités
 
-- **Authentification JWT** — rôles Admin / Lecteur
+- **Système de packs** — FREE, PRO, INSTITUTIONNEL, DÉVELOPPEUR (permissions & quotas)
+- **Rate limiting** — 100 req/jour, 1 000 req/mois pour le pack FREE (minuit GMT+1)
+- **Inscription publique** — avec validation admin obligatoire
+- **Authentification JWT** — rôles Admin / Lecteur + pack
 - **Import multi-feuilles** — Nomenclature, Non Renouvelés, Retraits (Excel)
 - **Recherche full-text** — DCI, nom de marque, code, laboratoire
 - **CRUD complet** — création, modification, suppression logique
@@ -98,18 +101,29 @@ curl -H "Authorization: Bearer <TOKEN>" http://localhost:8000/medicaments
 |---|---|---|---|
 | POST | `/auth/login` | Connexion (retourne JWT) | Public |
 | GET | `/auth/me` | Utilisateur courant | Auth |
-| POST | `/auth/signup` | Créer un utilisateur | Admin |
+| POST | `/auth/signup` | Demander un accès (public, pending approval) | Public |
+
+### Packs & Permissions
+
+| Pack | Cible | Recherche | Filtres avancés | DCI | Retraits | Stats | Dashboard | Export CSV | Limite |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|---|
+| **FREE** | Public | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 100/j · 1 000/mois |
+| **PRO** | Pharmacies | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | Illimité |
+| **INSTITUTIONNEL** | Hôpitaux | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Illimité |
+| **DÉVELOPPEUR** | Éditeurs logiciels | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Illimité |
+
+> `GET /packs` — catalogue public des packs (sans token)
 
 ### Médicaments (`/medicaments`)
 
-| Méthode | Endpoint | Description | Rôle |
+| Méthode | Endpoint | Description | Pack minimum |
 |---|---|---|---|
-| GET | `/medicaments` | Lister (pagination, filtres, recherche `?q=`) | Auth |
-| GET | `/medicaments/statistiques` | Stats par labo/pays/type/catégorie | Auth |
-| GET | `/medicaments/dashboard` | Dashboard enrichi (top 10, versions) | Auth |
-| GET | `/medicaments/export` | Export CSV avec filtres | Auth |
-| GET | `/medicaments/par-dci/{dci}` | Tous les médicaments d'une DCI | Auth |
-| GET | `/medicaments/{id}` | Détail d'un médicament | Auth |
+| GET | `/medicaments` | Lister (pagination, filtres, recherche `?q=`) | FREE |
+| GET | `/medicaments/{id}` | Détail d’un médicament | FREE |
+| GET | `/medicaments/par-dci/{dci}` | Tous les médicaments d’une DCI | PRO |
+| GET | `/medicaments/export` | Export CSV avec filtres | PRO |
+| GET | `/medicaments/statistiques` | Stats par labo/pays/type/catégorie | INSTITUTIONNEL |
+| GET | `/medicaments/dashboard` | Dashboard enrichi (top 10, versions) | INSTITUTIONNEL |
 | POST | `/medicaments` | Créer un médicament | Admin |
 | PUT | `/medicaments/{id}` | Modifier un médicament | Admin |
 | DELETE | `/medicaments/{id}` | Supprimer (soft delete) | Admin |
@@ -132,6 +146,23 @@ curl -H "Authorization: Bearer <TOKEN>" http://localhost:8000/medicaments
 | Méthode | Endpoint | Description | Rôle |
 |---|---|---|---|
 | GET | `/health` | Statut API + dernière version importée | Public |
+| GET | `/packs` | Catalogue des packs (fonctionnalités, limites) | Public |
+
+### Administration (`/admin`) — Admin uniquement
+
+| Méthode | Endpoint | Description |
+|---|---|---|
+| GET | `/admin/packs` | Catalogue complet des packs |
+| GET | `/admin/packs/{slug}` | Détail d'un pack |
+| GET | `/admin/users` | Lister les utilisateurs (filtre par pack, statut) |
+| GET | `/admin/users/pending` | Inscriptions en attente de validation |
+| GET | `/admin/users/{id}` | Détail d'un utilisateur |
+| POST | `/admin/users` | Créer un utilisateur (approuvé immédiatement) |
+| PATCH | `/admin/users/{id}` | Modifier un utilisateur (rôle, pack, statut) |
+| POST | `/admin/users/{id}/approve` | Approuver une inscription en attente |
+| POST | `/admin/users/{id}/pack` | Changer le pack d'un utilisateur |
+| DELETE | `/admin/users/{id}` | Désactiver un utilisateur (soft delete) |
+| GET | `/admin/stats` | Statistiques admin (users par pack, statut) |
 
 ---
 
@@ -189,13 +220,16 @@ app/
 ├── main.py                 # App FastAPI, lifespan, middleware logging
 ├── core/
 │   ├── config.py           # Settings (pydantic-settings)
-│   ├── security.py         # JWT, hashing, dépendances auth
-│   └── cache.py            # Cache TTL en mémoire
+│   ├── security.py         # JWT, hashing, pack guards, rate limiter
+│   ├── cache.py            # Cache TTL en mémoire
+│   └── packs.py            # Définitions packs, features, limites
 ├── auth/
-│   ├── models.py           # Modèle User
-│   ├── schemas.py          # Schemas Pydantic auth
+│   ├── models.py           # Modèle User (rôle, pack, quotas)
+│   ├── schemas.py          # Schemas auth, PackDetail, QuotaInfo
 │   ├── routes.py           # /auth/login, /auth/me, /auth/signup
 │   └── jwt.py              # Création de tokens
+├── admin/
+│   └── routes.py           # Gestion users, packs, approbations, stats
 ├── medicaments/
 │   ├── models.py           # Modèle Medicament (+ catégorie, retrait)
 │   ├── schemas.py          # Schemas CRUD, pagination, dashboard, DCI
@@ -218,7 +252,8 @@ tests/
 alembic/
 ├── env.py                  # Config Alembic async
 └── versions/
-    └── 002_add_categories.py  # Migration catégorie + retrait
+    ├── 002_add_categories.py  # Migration catégorie + retrait
+    └── 003_add_packs.py       # Migration packs, quotas, approbation
 ```
 
 ---

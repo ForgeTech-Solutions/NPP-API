@@ -2,7 +2,11 @@
 import logging
 import logging.config
 import time
-from fastapi import FastAPI, Request
+import secrets
+from fastapi import FastAPI, Request, Depends, HTTPException, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -10,6 +14,7 @@ from app.core.config import settings
 from app.auth.routes import router as auth_router
 from app.medicaments.routes import router as medicaments_router
 from app.importer.routes import router as import_router
+from app.admin.routes import router as admin_router
 from app.db.session import engine
 from app.db.base import Base
 from app.auth.models import User
@@ -77,7 +82,9 @@ async def lifespan(app: FastAPI):
                 email=settings.ADMIN_EMAIL,
                 hashed_password=get_password_hash(settings.ADMIN_PASSWORD),
                 role="ADMIN",
-                is_active=True
+                pack="DEVELOPPEUR",
+                is_active=True,
+                is_approved=True,
             )
             session.add(admin_user)
             await session.commit()
@@ -98,6 +105,8 @@ app = FastAPI(
     description=(
         "API pour la nomenclature nationale des produits pharmaceutiques à usage humain.\n\n"
         "## Fonctionnalités\n"
+        "- **Système de packs** : FREE, PRO, INSTITUTIONNEL, DÉVELOPPEUR\n"
+        "- **Rate limiting** : quota FREE (100 req/j, 1 000 req/mois)\n"
         "- **Authentification** JWT (Admin / Lecteur)\n"
         "- **Import** multi-feuilles Excel (Nomenclature, Non Renouvelés, Retraits)\n"
         "- **Recherche** full-text sur DCI, nom de marque, code, laboratoire\n"
@@ -106,8 +115,9 @@ app = FastAPI(
         "- **Nettoyage** automatique des doublons\n"
     ),
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=None,    # Disabled — served manually with Basic Auth below
+    redoc_url=None,   # Disabled — served manually with Basic Auth below
+    openapi_url=None,  # Disabled — served manually with Basic Auth below
 )
 
 # Configure CORS
@@ -118,6 +128,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Protected documentation (HTTP Basic Auth) ──────────────────────────
+docs_security = HTTPBasic()
+
+
+def _verify_docs_credentials(credentials: HTTPBasicCredentials = Depends(docs_security)):
+    """Verify HTTP Basic credentials for /docs, /redoc, /openapi.json."""
+    correct_user = secrets.compare_digest(credentials.username, settings.DOCS_USERNAME)
+    correct_pass = secrets.compare_digest(credentials.password, settings.DOCS_PASSWORD)
+    if not (correct_user and correct_pass):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Accès à la documentation refusé",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+
+@app.get("/openapi.json", include_in_schema=False)
+async def get_openapi(credentials: HTTPBasicCredentials = Depends(_verify_docs_credentials)):
+    """OpenAPI schema (protected)."""
+    return app.openapi()
+
+
+@app.get("/docs", include_in_schema=False)
+async def swagger_ui(credentials: HTTPBasicCredentials = Depends(_verify_docs_credentials)):
+    """Swagger UI (protected)."""
+    return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{settings.APP_NAME} — Docs")
+
+
+@app.get("/redoc", include_in_schema=False)
+async def redoc_ui(credentials: HTTPBasicCredentials = Depends(_verify_docs_credentials)):
+    """ReDoc (protected)."""
+    return get_redoc_html(openapi_url="/openapi.json", title=f"{settings.APP_NAME} — ReDoc")
 
 
 # ── Request logging middleware ──────────────────────────────────────────
@@ -167,10 +211,19 @@ async def health_check():
     return response
 
 
+# ── Public pack catalog (no auth required) ─────────────────────────────
+@app.get("/packs", tags=["Packs"], summary="Catalogue des packs (public)")
+async def public_pack_catalog():
+    """Liste publique des packs disponibles avec fonctionnalités et limites."""
+    from app.core.packs import PACK_CATALOG
+    return {"packs": list(PACK_CATALOG.values()), "total": len(PACK_CATALOG)}
+
+
 # Include routers
 app.include_router(auth_router)
 app.include_router(medicaments_router)
 app.include_router(import_router)
+app.include_router(admin_router)
 
 
 if __name__ == "__main__":
