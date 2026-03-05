@@ -19,6 +19,7 @@ from app.admin.routes import router as admin_router
 from app.db.session import engine
 from app.db.base import Base
 from app.auth.models import User
+from app.models.service_meta import ServiceMeta
 from app.core.security import get_password_hash
 
 # ── Logging configuration ──────────────────────────────────────────────
@@ -98,7 +99,21 @@ async def lifespan(app: FastAPI):
             logger.info(f"Initial admin user created: {settings.ADMIN_EMAIL}")
         else:
             logger.info(f"Admin user already exists: {settings.ADMIN_EMAIL}")
-    
+
+    # Store first deployment timestamp (set once, never overwritten)
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy import select
+        existing = await session.scalar(
+            select(ServiceMeta).where(ServiceMeta.key == "first_deployed_at")
+        )
+        if not existing:
+            session.add(ServiceMeta(
+                key="first_deployed_at",
+                value=datetime.utcnow().isoformat(),
+            ))
+            await session.commit()
+            logger.info("Service first_deployed_at recorded")
+
     yield
     
     await engine.dispose()
@@ -187,16 +202,17 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-# Track startup time for uptime calculation
+# Track current worker startup time
 _startup_time = datetime.utcnow()
 
 
 # Health check endpoint
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """Check API health status with database stats."""
+    """Check API health status with database stats and uptime percentage."""
     from app.db.session import AsyncSessionLocal
     from app.models.import_log import ImportLog
+    from app.models.service_meta import ServiceMeta
     from app.medicaments.models import Medicament
     from sqlalchemy import select, func
     import time as _time
@@ -210,6 +226,7 @@ async def health_check():
         "version": settings.APP_VERSION,
         "uptime": uptime_str,
         "uptime_seconds": uptime_seconds,
+        "uptime_percent": None,
         "db_latency_ms": None,
         "total_medicaments": None,
         "total_laboratoires": None,
@@ -231,6 +248,17 @@ async def health_check():
 
             # Latence DB
             db_latency_ms = round((_time.monotonic() - t0) * 1000, 2)
+
+            # Premier démarrage du service (date de déploiement initial)
+            first_deployed_row = await session.scalar(
+                select(ServiceMeta).where(ServiceMeta.key == "first_deployed_at")
+            )
+            if first_deployed_row:
+                first_deployed_at = datetime.fromisoformat(first_deployed_row.value)
+                total_observed_seconds = max(1, (now - first_deployed_at).total_seconds())
+                uptime_pct = round(min(uptime_seconds / total_observed_seconds * 100, 100.0), 2)
+                response["uptime_percent"] = uptime_pct
+                response["deployed_since"] = first_deployed_row.value
 
             # Dernier import réussi
             result = await session.execute(
