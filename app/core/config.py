@@ -1,28 +1,31 @@
 """Application configuration settings."""
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
 import os
+
+from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-    
+
     # Database - Support both PostgreSQL (production) and SQLite (development)
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", 
-        "sqlite+aiosqlite:///./nomenclature.db"
-    )
-    
+    DATABASE_URL: str = "sqlite+aiosqlite:///./nomenclature.db"
+    POSTGRES_USER: str = "npp"
+    POSTGRES_PASSWORD: str = "npp_secret"
+    POSTGRES_DB: str = "nomenclature"
+    POSTGRES_HOST: str = "db"
+    POSTGRES_PORT: int = 5432
+
     # JWT
     SECRET_KEY: str = "your-secret-key-here-change-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    
+
     # App
     APP_NAME: str = "Nomenclature API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
-    
+
     # Admin (initial user)
     ADMIN_EMAIL: str = "admin@nomenclature.dz"
     ADMIN_PASSWORD: str = "Admin2025!"
@@ -30,11 +33,36 @@ class Settings(BaseSettings):
     # Docs protection (HTTP Basic Auth on /docs, /redoc, /openapi.json)
     DOCS_USERNAME: str = "admin"
     DOCS_PASSWORD: str = "docs2025!"
-    
+
+    @model_validator(mode="after")
+    def normalize_database_url(self):
+        """Build a reliable DB URL for Docker and sanitize malformed values."""
+        db_url = (self.DATABASE_URL or "").strip().strip('"').strip("'")
+        running_in_docker = os.path.exists("/.dockerenv") or os.getenv("RUNNING_IN_DOCKER") == "1"
+
+        if running_in_docker:
+            self.DATABASE_URL = (
+                f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            )
+            return self
+
+        if not db_url:
+            self.DATABASE_URL = "sqlite+aiosqlite:///./nomenclature.db"
+            return self
+
+        placeholder_markers = ["@host:", "://user:password@", "://user:pass@"]
+        if any(marker in db_url for marker in placeholder_markers):
+            self.DATABASE_URL = "sqlite+aiosqlite:///./nomenclature.db"
+            return self
+
+        self.DATABASE_URL = db_url
+        return self
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=True
+        case_sensitive=True,
     )
 
 
