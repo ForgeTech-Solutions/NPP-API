@@ -40,6 +40,8 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@nomenclature.dz}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin2025!}
+      DOCS_USERNAME: ${DOCS_USERNAME:-admin}
+      DOCS_PASSWORD: ${DOCS_PASSWORD:-docs2025!}
       RECREATE_TABLES: ${RECREATE_TABLES:-false}
       DEBUG: ${DEBUG:-false}
     volumes:
