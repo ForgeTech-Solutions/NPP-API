@@ -1,4 +1,5 @@
 """Import routes for nomenclature."""
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -8,11 +9,14 @@ import json
 
 from app.importer.excel_parser import parse_excel_file, validate_medicament_record, get_available_sheets
 from app.medicaments.models import Medicament
+from app.medicaments.crud import clean_duplicates as crud_clean_duplicates
 from app.models.import_log import ImportLog
 from app.auth.models import User
 from app.core.security import get_current_admin
 from app.db.session import get_db
 from pydantic import BaseModel
+
+logger = logging.getLogger("nomenclature.import")
 
 router = APIRouter(prefix="/import", tags=["Import"])
 
@@ -22,6 +26,7 @@ class SheetPreview(BaseModel):
     name: str
     rows: int
     detected_type: str
+    detected_category: str = "unknown"
     columns: List[str]
     error: Optional[str] = None
 
@@ -37,6 +42,7 @@ class SheetImportResult(BaseModel):
     rows_inserted: int
     rows_updated: int
     rows_ignored: int
+    category: str
     errors: List[dict]
 
 
@@ -59,12 +65,13 @@ class ImportResult:
         self.sheets_processed = {}
         self.available_sheets = []
     
-    def add_sheet_result(self, sheet_name: str, inserted: int, updated: int, ignored: int, errors: list):
+    def add_sheet_result(self, sheet_name: str, inserted: int, updated: int, ignored: int, errors: list, category: str = "NOMENCLATURE"):
         """Add result for a sheet."""
         self.sheets_processed[sheet_name] = {
             "rows_inserted": inserted,
             "rows_updated": updated,
             "rows_ignored": ignored,
+            "category": category,
             "errors": errors
         }
     
@@ -87,87 +94,60 @@ class ImportResult:
         }
 
 
-@router.post("/sheets/preview", response_model=SheetsPreviewResponse)
+@router.post(
+    "/sheets/preview",
+    response_model=SheetsPreviewResponse,
+    summary="Prévisualiser les feuilles Excel",
+    description="Voir les feuilles disponibles et leur catégorie détectée avant d'importer."
+)
 async def preview_excel_sheets(
-    file: UploadFile = File(..., description="Excel file to preview"),
-    current_user: User = Depends(get_current_admin)  # Admin only
+    file: UploadFile = File(..., description="Fichier Excel à prévisualiser"),
+    current_user: User = Depends(get_current_admin)
 ):
-    """
-    Preview available sheets in an Excel file without importing.
-    
-    Requires Admin role.
-    
-    Args:
-        file: Excel file upload
-        current_user: Current admin user
-        
-    Returns:
-        SheetsPreviewResponse: List of available sheets with metadata
-    """
-    # Validate file type
+    """Prévisualiser les feuilles d'un fichier Excel."""
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must be an Excel file (.xlsx or .xls)"
+            detail="Le fichier doit être un fichier Excel (.xlsx ou .xls)"
         )
     
     try:
-        # Read file content
         file_content = await file.read()
-        
-        # Get sheet information
         sheets = get_available_sheets(file_content)
-        
         return SheetsPreviewResponse(
             filename=file.filename,
             sheets=[SheetPreview(**sheet) for sheet in sheets]
         )
-        
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error reading file: {str(e)}"
+            detail=f"Erreur de lecture: {str(e)}"
         )
 
 
-@router.post("/nomenclature")
+@router.post(
+    "/nomenclature",
+    summary="Importer la nomenclature",
+    description="Importer toutes les feuilles d'un fichier Excel (Nomenclature, Non Renouvelés, Retraits). "
+                "Chaque feuille est automatiquement catégorisée."
+)
 async def import_nomenclature(
-    file: UploadFile = File(..., description="Excel file containing nomenclature"),
-    version: str = Form(..., description="Version of nomenclature (e.g., 2025-07-31)"),
-    sheet_names: Optional[str] = Form(None, description="Comma-separated list of sheet names to import (empty = all sheets)"),
-    remplacer_version: bool = Form(False, description="Replace existing version"),
+    file: UploadFile = File(..., description="Fichier Excel de nomenclature"),
+    version: str = Form(..., description="Version de la nomenclature (ex: 2025-06-30)"),
+    sheet_names: Optional[str] = Form(None, description="Noms des feuilles à importer, séparés par virgule (vide = toutes)"),
+    remplacer_version: bool = Form(False, description="Remplacer la version existante"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin)  # Admin only
+    current_user: User = Depends(get_current_admin)
 ):
-    """
-    Import nomenclature from Excel file (supports multi-sheet import).
-    
-    Requires Admin role.
-    
-    Args:
-        file: Excel file upload
-        version: Version identifier for this nomenclature
-        sheet_names: Optional comma-separated list of sheet names to import
-        remplacer_version: If True, soft delete existing entries with same version
-        db: Database session
-        current_user: Current admin user
-        
-    Returns:
-        dict: Import results with counts and errors per sheet
-    """
-    # Validate file type
+    """Importer la nomenclature depuis un fichier Excel (multi-feuilles)."""
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must be an Excel file (.xlsx or .xls)"
+            detail="Le fichier doit être un fichier Excel (.xlsx ou .xls)"
         )
     
-    # Parse sheet_names parameter
     sheets_to_import = None
     if sheet_names:
         sheets_to_import = [s.strip() for s in sheet_names.split(',') if s.strip()]
@@ -184,22 +164,18 @@ async def import_nomenclature(
     result = ImportResult(version=version, filename=file.filename)
     
     try:
-        # Read file content
         file_content = await file.read()
-        
-        # Get all available sheets
         available_sheets_info = get_available_sheets(file_content)
         result.available_sheets = [sheet["name"] for sheet in available_sheets_info]
         
         # Determine which sheets to process
         if sheets_to_import:
-            # Validate specified sheets exist
             available_names = set(result.available_sheets)
             invalid_sheets = [s for s in sheets_to_import if s not in available_names]
             if invalid_sheets:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid sheet names: {', '.join(invalid_sheets)}. Available: {', '.join(result.available_sheets)}"
+                    detail=f"Feuilles invalides: {', '.join(invalid_sheets)}. Disponibles: {', '.join(result.available_sheets)}"
                 )
             sheets_to_process = sheets_to_import
         else:
@@ -208,12 +184,12 @@ async def import_nomenclature(
                 sheet["name"] for sheet in available_sheets_info 
                 if sheet["detected_type"] == "medicaments"
             ]
-            
             if not sheets_to_process:
-                # If no medicament sheets detected, process all sheets
                 sheets_to_process = result.available_sheets
         
-        # If remplacer_version is True, soft delete existing entries
+        logger.info(f"Import starting: {len(sheets_to_process)} sheets to process for version {version}")
+        
+        # If remplacer_version, soft delete existing entries
         if remplacer_version:
             update_result = await db.execute(
                 select(Medicament).where(
@@ -225,6 +201,7 @@ async def import_nomenclature(
             for med in existing_medicaments:
                 med.deleted = True
             await db.commit()
+            logger.info(f"Soft-deleted {len(existing_medicaments)} existing entries for version {version}")
         
         # Process each sheet
         for sheet_name in sheets_to_process:
@@ -232,15 +209,16 @@ async def import_nomenclature(
             sheet_updated = 0
             sheet_ignored = 0
             sheet_errors = []
+            sheet_category = "NOMENCLATURE"
             
             try:
-                # Parse Excel sheet
                 records = parse_excel_file(file_content, sheet_name=sheet_name)
                 
-                # Process each record
+                if records:
+                    sheet_category = records[0].get('categorie', 'NOMENCLATURE')
+                
                 for idx, record in enumerate(records, start=1):
                     try:
-                        # Validate record
                         is_valid, validation_errors = validate_medicament_record(record)
                         if not is_valid:
                             sheet_errors.append({
@@ -250,74 +228,70 @@ async def import_nomenclature(
                             sheet_ignored += 1
                             continue
                         
-                        # Add version and source file
                         record['version_nomenclature'] = version
                         record['source_fichier'] = file.filename
                         
-                        # Check if medicament exists (by code and version)
+                        # Check if medicament exists (by code + version + categorie)
                         existing = await db.execute(
                             select(Medicament).where(
                                 Medicament.code == record['code'],
                                 Medicament.version_nomenclature == version,
+                                Medicament.categorie == record.get('categorie', 'NOMENCLATURE'),
                                 Medicament.deleted == False
                             )
                         )
                         existing_meds = existing.scalars().all()
                         
                         if len(existing_meds) > 1:
-                            # Multiple records found - log as error and skip
                             sheet_errors.append({
                                 "row": idx,
-                                "message": f"Duplicate code '{record['code']}' found in database ({len(existing_meds)} entries). Skipping to avoid conflicts."
+                                "message": f"Duplicate code '{record['code']}' ({len(existing_meds)} entries). Skipping."
                             })
                             sheet_ignored += 1
                             continue
                         elif len(existing_meds) == 1:
-                            # Update existing medicament
                             existing_med = existing_meds[0]
                             for key, value in record.items():
                                 if key not in ['id', 'created_at']:
                                     setattr(existing_med, key, value)
                             sheet_updated += 1
                         else:
-                            # Create new medicament
                             new_medicament = Medicament(**record)
                             db.add(new_medicament)
                             sheet_inserted += 1
                         
-                        # Commit every 100 records to avoid memory issues
                         if (sheet_inserted + sheet_updated) % 100 == 0:
                             await db.commit()
                             
                     except Exception as e:
                         sheet_errors.append({
                             "row": idx,
-                            "message": f"Error processing row: {str(e)}"
+                            "message": f"Error: {str(e)}"
                         })
                         sheet_ignored += 1
                         continue
                 
-                # Final commit for this sheet
                 await db.commit()
                 
-                # Add sheet result
                 result.add_sheet_result(
                     sheet_name=sheet_name,
                     inserted=sheet_inserted,
                     updated=sheet_updated,
                     ignored=sheet_ignored,
-                    errors=sheet_errors
+                    errors=sheet_errors,
+                    category=sheet_category,
                 )
                 
+                logger.info(f"Sheet '{sheet_name}' ({sheet_category}): +{sheet_inserted} inserted, ~{sheet_updated} updated, -{sheet_ignored} ignored")
+                
             except Exception as e:
-                # Error processing entire sheet
                 result.add_sheet_result(
                     sheet_name=sheet_name,
-                    inserted=0,
-                    updated=0,
-                    ignored=0,
-                    errors=[{"message": f"Failed to process sheet: {str(e)}"}]
+                    inserted=0, updated=0, ignored=0,
+                    errors=[{"message": f"Failed to process sheet: {str(e)}"}],
+                    category="unknown",
                 )
+                logger.error(f"Failed to process sheet '{sheet_name}': {e}")
                 continue
         
         # Update import log
@@ -326,7 +300,6 @@ async def import_nomenclature(
         import_log.rows_updated = result.total_rows_updated
         import_log.rows_ignored = sum(r["rows_ignored"] for r in result.sheets_processed.values())
         
-        # Combine all errors from all sheets
         all_errors = []
         for sheet_name, sheet_result in result.sheets_processed.items():
             for error in sheet_result["errors"]:
@@ -335,69 +308,55 @@ async def import_nomenclature(
         import_log.errors = json.dumps(all_errors) if all_errors else None
         await db.commit()
         
+        logger.info(f"Import complete: {result.total_rows_inserted} inserted, {result.total_rows_updated} updated")
         return result.to_dict()
         
+    except HTTPException:
+        raise
     except Exception as e:
-        # Update import log with error
         import_log.end_time = datetime.utcnow()
         import_log.errors = json.dumps([{"message": str(e)}])
         await db.commit()
-        
+        logger.error(f"Import failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Import failed: {str(e)}"
         )
 
 
-@router.get("/duplicates")
+@router.get(
+    "/duplicates",
+    summary="Détecter les doublons",
+    description="Détecter les codes en double dans la base, groupés par code+version+catégorie."
+)
 async def detect_duplicates(
     version: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
-    """
-    Detect duplicate codes in the database.
-    
-    Requires Admin role.
-    
-    Args:
-        version: Optional version filter
-        db: Database session
-        current_user: Current admin user
-        
-    Returns:
-        dict: List of duplicate codes with counts
-    """
+    """Détecter les codes en double."""
     from sqlalchemy import func
     
-    # Build query
     query = select(
         Medicament.code,
         Medicament.version_nomenclature,
+        Medicament.categorie,
         func.count(Medicament.id).label('count')
-    ).where(
-        Medicament.deleted == False
-    )
+    ).where(Medicament.deleted == False)
     
     if version:
         query = query.where(Medicament.version_nomenclature == version)
     
     query = query.group_by(
-        Medicament.code,
-        Medicament.version_nomenclature
-    ).having(
-        func.count(Medicament.id) > 1
-    )
+        Medicament.code, Medicament.version_nomenclature, Medicament.categorie
+    ).having(func.count(Medicament.id) > 1)
     
     result = await db.execute(query)
     duplicates = result.all()
     
     duplicates_list = [
-        {
-            "code": dup.code,
-            "version": dup.version_nomenclature,
-            "count": dup.count
-        }
+        {"code": dup.code, "version": dup.version_nomenclature, 
+         "categorie": dup.categorie, "count": dup.count}
         for dup in duplicates
     ]
     
@@ -407,116 +366,26 @@ async def detect_duplicates(
     }
 
 
-@router.post("/clean-duplicates")
-async def clean_duplicates(
+@router.post(
+    "/clean-duplicates",
+    summary="Nettoyer les doublons",
+    description="Nettoyer les doublons en gardant une seule entrée par code+version+catégorie. "
+                "Par défaut en mode dry_run (simulation)."
+)
+async def clean_duplicates_endpoint(
     version: Optional[str] = None,
-    keep_strategy: str = "latest",  # "latest" or "first"
+    keep_strategy: str = "latest",
     dry_run: bool = True,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
-    """
-    Clean duplicate codes in the database by keeping only one entry.
-    
-    Requires Admin role.
-    
-    Args:
-        version: Optional version filter
-        keep_strategy: Which entry to keep - "latest" (newest created_at) or "first" (oldest created_at)
-        dry_run: If True, only show what would be deleted without actually deleting
-        db: Database session
-        current_user: Current admin user
-        
-    Returns:
-        dict: List of cleaned duplicates
-    """
+    """Nettoyer les doublons (dry_run par défaut)."""
     if keep_strategy not in ["latest", "first"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="keep_strategy must be 'latest' or 'first'"
+            detail="keep_strategy doit être 'latest' ou 'first'"
         )
     
-    from sqlalchemy import func
-    
-    # Find duplicate codes
-    dup_query = select(
-        Medicament.code,
-        Medicament.version_nomenclature,
-        func.count(Medicament.id).label('count')
-    ).where(
-        Medicament.deleted == False
-    )
-    
-    if version:
-        dup_query = dup_query.where(Medicament.version_nomenclature == version)
-    
-    dup_query = dup_query.group_by(
-        Medicament.code,
-        Medicament.version_nomenclature
-    ).having(
-        func.count(Medicament.id) > 1
-    )
-    
-    dup_result = await db.execute(dup_query)
-    duplicates = dup_result.all()
-    
-    cleaned = []
-    total_deleted = 0
-    
-    # Process each duplicate group
-    for dup in duplicates:
-        # Get all entries for this code/version
-        entries_query = select(Medicament).where(
-            Medicament.code == dup.code,
-            Medicament.version_nomenclature == dup.version_nomenclature,
-            Medicament.deleted == False
-        ).order_by(
-            Medicament.created_at.desc() if keep_strategy == "latest" else Medicament.created_at.asc()
-        )
-        
-        entries_result = await db.execute(entries_query)
-        entries = entries_result.scalars().all()
-        
-        if len(entries) > 1:
-            # Keep first entry, mark others as deleted
-            kept_entry = entries[0]
-            deleted_entries = []
-            
-            for entry in entries[1:]:
-                deleted_entries.append({
-                    "id": entry.id,
-                    "code": entry.code,
-                    "dci": entry.dci,
-                    "nom_marque": entry.nom_marque,
-                    "created_at": entry.created_at.isoformat()
-                })
-                
-                if not dry_run:
-                    entry.deleted = True
-                
-                total_deleted += 1
-            
-            cleaned.append({
-                "code": dup.code,
-                "version": dup.version_nomenclature,
-                "total_found": len(entries),
-                "kept": {
-                    "id": kept_entry.id,
-                    "code": kept_entry.code,
-                    "dci": kept_entry.dci,
-                    "nom_marque": kept_entry.nom_marque,
-                    "created_at": kept_entry.created_at.isoformat()
-                },
-                "deleted": deleted_entries
-            })
-    
-    if not dry_run:
-        await db.commit()
-    
-    return {
-        "dry_run": dry_run,
-        "keep_strategy": keep_strategy,
-        "total_duplicate_groups": len(cleaned),
-        "total_entries_deleted": total_deleted,
-        "cleaned": cleaned
-    }
+    result = await crud_clean_duplicates(db, version=version, keep_strategy=keep_strategy, dry_run=dry_run)
+    logger.info(f"Clean duplicates: {result['total_entries_deleted']} deleted (dry_run={dry_run})")
+    return result

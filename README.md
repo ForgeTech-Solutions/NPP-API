@@ -1,307 +1,362 @@
 # API Nomenclature Produits Pharmaceutiques
 
-API FastAPI pour la gestion de la nomenclature nationale des produits pharmaceutiques à usage humain (version Juillet 2025).
+API REST pour la gestion de la **nomenclature nationale des produits pharmaceutiques à usage humain** (Algérie).
 
-## 🚀 Fonctionnalités
+## Fonctionnalités
 
-- ✅ **Authentification JWT** avec gestion des rôles (Admin/Lecteur)
-- ✅ **CRUD complet** pour la gestion des médicaments
-- ✅ **Recherche avancée** avec filtres multiples et pagination
-- ✅ **Import Excel** automatisé de nouvelles versions de nomenclature
-- ✅ **Suppression logique** des enregistrements
-- ✅ **Statistiques** par laboratoire, pays et type
-- ✅ **Documentation automatique** (Swagger/ReDoc)
-- ✅ **Base de données PostgreSQL** avec SQLAlchemy async
-- ✅ **Migrations Alembic** pour la gestion du schéma
+- **Authentification JWT** — rôles Admin / Lecteur
+- **Import multi-feuilles** — Nomenclature, Non Renouvelés, Retraits (Excel)
+- **Recherche full-text** — DCI, nom de marque, code, laboratoire
+- **CRUD complet** — création, modification, suppression logique
+- **Pagination & tri** — `sort_by`, `order`, `page`, `page_size`
+- **Dashboard & statistiques** — top labos, répartition par type/pays/catégorie
+- **Export CSV** — avec filtres
+- **Nettoyage doublons** — détection et suppression avec dry-run
+- **Cache TTL** — cache en mémoire (5 min) sur les endpoints stats
+- **Logging structuré** — middleware de logs HTTP + loggers par module
+- **Documentation auto** — Swagger (`/docs`) et ReDoc (`/redoc`)
 
-## 📋 Prérequis
+## Stack technique
 
-- Python 3.11+
-- PostgreSQL 12+
-- pip ou poetry pour la gestion des dépendances
+| Composant | Technologie |
+|---|---|
+| Framework | FastAPI 0.115 |
+| ORM | SQLAlchemy 2.0 (async) |
+| BDD dev | SQLite + aiosqlite |
+| BDD prod | PostgreSQL + asyncpg |
+| Auth | JWT (HS256, 30 min) |
+| Migrations | Alembic |
+| Serveur prod | Gunicorn + UvicornWorker |
+| Tests | pytest + pytest-asyncio + httpx |
+| Conteneurs | Docker + Docker Compose |
+| Hébergement | Render.com |
 
-## 🛠️ Installation
-
-### 1. Cloner le dépôt
+## Installation
 
 ```bash
+# Cloner et entrer dans le projet
 cd "API NPP"
-```
 
-### 2. Créer un environnement virtuel
+# Créer l'environnement virtuel
+python3 -m venv venv
+source venv/bin/activate
 
-```bash
-python -m venv venv
-source venv/bin/activate  # Sur macOS/Linux
-# ou
-venv\Scripts\activate  # Sur Windows
-```
-
-### 3. Installer les dépendances
-
-```bash
+# Installer les dépendances
 pip install -r requirements.txt
 ```
 
-### 4. Configurer la base de données
+## Configuration
 
-Créer une base de données PostgreSQL :
-
-```bash
-createdb nomenclature_db
-```
-
-### 5. Configurer les variables d'environnement
-
-Copier le fichier `.env.example` vers `.env` et modifier les valeurs :
-
-```bash
-cp .env.example .env
-```
-
-Éditer `.env` :
+Copier `.env.example` vers `.env` et adapter :
 
 ```env
-# Database
-DATABASE_URL=postgresql+asyncpg://user:password@localhost/nomenclature_db
+DATABASE_URL=sqlite+aiosqlite:///./nomenclature.db   # dev
+# DATABASE_URL=postgresql+asyncpg://user:pass@host/db  # prod
 
-# JWT
-SECRET_KEY=votre-cle-secrete-tres-forte-ici
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# App
-APP_NAME=Nomenclature API
-APP_VERSION=1.0.0
-DEBUG=True
-
-# Admin (initial user)
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=votre-mot-de-passe-admin
+SECRET_KEY=votre-cle-secrete
+ADMIN_EMAIL=admin@nomenclature.dz
+ADMIN_PASSWORD=Admin2025!
 ```
 
-### 6. Créer les migrations initiales (optionnel)
+## Démarrage
 
 ```bash
-alembic revision --autogenerate -m "Initial migration"
-alembic upgrade head
-```
+# Démarrage rapide
+./start.sh
 
-Note : L'application crée automatiquement les tables au démarrage si elles n'existent pas.
-
-## 🚀 Démarrage
-
-### Mode développement
-
-```bash
+# Ou manuellement
+source venv/bin/activate
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Ou directement avec Python :
-
-```bash
-python -m app.main
-```
-
-### Mode production
-
-```bash
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
-```
-
-L'API sera accessible sur : **http://localhost:8000**
-
-## 📚 Documentation
-
-- **Swagger UI** : http://localhost:8000/docs
+L'API est accessible sur `http://localhost:8000` :
+- **Swagger** : http://localhost:8000/docs
 - **ReDoc** : http://localhost:8000/redoc
+- **Health** : http://localhost:8000/health
 
-## 🔐 Authentification
+## Authentification
 
-### 1. Se connecter
-
-```bash
-curl -X POST "http://localhost:8000/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "admin@example.com", "password": "votre-mot-de-passe"}'
-```
-
-Réponse :
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer"
-}
-```
-
-### 2. Utiliser le token
-
-Pour toutes les requêtes protégées, ajouter l'en-tête :
-
-```
-Authorization: Bearer <votre_token>
-```
-
-## 📖 Endpoints principaux
-
-### Santé
-- `GET /health` - Vérifier l'état de l'API
-
-### Authentification
-- `POST /auth/login` - Se connecter (public)
-- `GET /auth/me` - Obtenir les infos utilisateur (authentifié)
-- `POST /auth/signup` - Créer un utilisateur (admin uniquement)
-
-### Médicaments
-- `GET /medicaments` - Lister/rechercher des médicaments (authentifié)
-- `GET /medicaments/{id}` - Détails d'un médicament (authentifié)
-- `GET /medicaments/statistiques` - Statistiques (authentifié)
-- `POST /medicaments` - Créer un médicament (admin)
-- `PUT /medicaments/{id}` - Modifier un médicament (admin)
-- `DELETE /medicaments/{id}` - Supprimer un médicament (admin)
-
-### Import
-- `POST /import/nomenclature` - Importer un fichier Excel (admin)
-
-## 🔍 Exemples d'utilisation
-
-### Rechercher des médicaments
+L'admin par défaut est créé au démarrage : `admin@nomenclature.dz` / `Admin2025!`
 
 ```bash
-curl -X GET "http://localhost:8000/medicaments?page=1&page_size=10&q=CETIRIZINE" \
-  -H "Authorization: Bearer <token>"
+# Se connecter (OAuth2 form)
+curl -X POST http://localhost:8000/auth/login \
+  -d "username=admin@nomenclature.dz" \
+  -d "password=Admin2025!"
+
+# Utiliser le token
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:8000/medicaments
 ```
-
-Avec filtres multiples :
-
-```bash
-curl -X GET "http://localhost:8000/medicaments?laboratoire=SAIDAL&pays_laboratoire=ALGERIE&type=GE" \
-  -H "Authorization: Bearer <token>"
-```
-
-### Créer un médicament
-
-```bash
-curl -X POST "http://localhost:8000/medicaments" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "code": "01 A 999",
-    "dci": "PARACETAMOL",
-    "nom_marque": "DOLIPRANE",
-    "forme": "COMPRIME",
-    "dosage": "500MG",
-    "conditionnement": "B/20",
-    "laboratoire": "SANOFI",
-    "pays_laboratoire": "FRANCE",
-    "type_medicament": "PRINCEPS",
-    "statut": "F",
-    "version_nomenclature": "2025-07-31"
-  }'
-```
-
-### Importer un fichier Excel
-
-```bash
-curl -X POST "http://localhost:8000/import/nomenclature" \
-  -H "Authorization: Bearer <token>" \
-  -F "file=@nomenclature.xlsx" \
-  -F "version=2025-07-31" \
-  -F "remplacer_version=false"
-```
-
-## 🧪 Tests
-
-Les tests seront ajoutés dans le dossier `tests/`.
-
-```bash
-# Installer les dépendances de test
-pip install pytest pytest-asyncio httpx
-
-# Exécuter les tests
-pytest
-```
-
-## 📁 Structure du projet
-
-```
-API NPP/
-├── app/
-│   ├── __init__.py
-│   ├── main.py                 # Point d'entrée FastAPI
-│   ├── core/
-│   │   ├── config.py           # Configuration
-│   │   └── security.py         # Sécurité JWT
-│   ├── auth/
-│   │   ├── models.py           # Modèle User
-│   │   ├── schemas.py          # Schémas Pydantic
-│   │   ├── routes.py           # Routes auth
-│   │   └── jwt.py              # Gestion JWT
-│   ├── medicaments/
-│   │   ├── models.py           # Modèle Medicament
-│   │   ├── schemas.py          # Schémas Pydantic
-│   │   ├── crud.py             # Opérations CRUD
-│   │   └── routes.py           # Routes médicaments
-│   ├── importer/
-│   │   ├── excel_parser.py     # Parser Excel
-│   │   └── routes.py           # Routes import
-│   ├── db/
-│   │   ├── base.py             # Base SQLAlchemy
-│   │   └── session.py          # Sessions DB
-│   └── models/
-│       └── import_log.py       # Modèle ImportLog
-├── alembic/
-│   ├── versions/               # Migrations
-│   └── env.py                  # Config Alembic
-├── tests/                      # Tests
-├── requirements.txt            # Dépendances
-├── .env.example               # Exemple config
-├── .gitignore
-├── alembic.ini                # Config Alembic
-├── API_Specification.md       # Spécification complète
-└── README.md                  # Ce fichier
-```
-
-## 🔒 Sécurité
-
-- Tous les endpoints sensibles sont protégés par JWT
-- Hachage des mots de passe avec bcrypt
-- Gestion des rôles (Admin/Lecteur)
-- Validation des entrées avec Pydantic
-- Suppression logique des enregistrements
-
-## 🐛 Dépannage
-
-### Erreur de connexion à la base de données
-
-Vérifier que PostgreSQL est en cours d'exécution et que la chaîne de connexion dans `.env` est correcte.
-
-### Erreur d'import de modules
-
-S'assurer que l'environnement virtuel est activé et que toutes les dépendances sont installées :
-
-```bash
-pip install -r requirements.txt
-```
-
-### Problème avec Alembic
-
-Recréer les migrations :
-
-```bash
-alembic revision --autogenerate -m "Initial"
-alembic upgrade head
-```
-
-## 📝 Licence
-
-Ce projet est développé pour la gestion de la nomenclature nationale des produits pharmaceutiques.
-
-## 👥 Contact
-
-Pour toute question ou suggestion, veuillez contacter l'équipe de développement.
 
 ---
 
-**Version** : 1.0.0  
-**Dernière mise à jour** : Décembre 2025
+## Endpoints API
+
+### Authentification (`/auth`)
+
+| Méthode | Endpoint | Description | Rôle |
+|---|---|---|---|
+| POST | `/auth/login` | Connexion (retourne JWT) | Public |
+| GET | `/auth/me` | Utilisateur courant | Auth |
+| POST | `/auth/signup` | Créer un utilisateur | Admin |
+
+### Médicaments (`/medicaments`)
+
+| Méthode | Endpoint | Description | Rôle |
+|---|---|---|---|
+| GET | `/medicaments` | Lister (pagination, filtres, recherche `?q=`) | Auth |
+| GET | `/medicaments/statistiques` | Stats par labo/pays/type/catégorie | Auth |
+| GET | `/medicaments/dashboard` | Dashboard enrichi (top 10, versions) | Auth |
+| GET | `/medicaments/export` | Export CSV avec filtres | Auth |
+| GET | `/medicaments/par-dci/{dci}` | Tous les médicaments d'une DCI | Auth |
+| GET | `/medicaments/{id}` | Détail d'un médicament | Auth |
+| POST | `/medicaments` | Créer un médicament | Admin |
+| PUT | `/medicaments/{id}` | Modifier un médicament | Admin |
+| DELETE | `/medicaments/{id}` | Supprimer (soft delete) | Admin |
+
+#### Filtres disponibles sur `GET /medicaments`
+
+`q`, `dci`, `nom_marque`, `code`, `num_enregistrement`, `laboratoire`, `pays_laboratoire`, `liste`, `type`, `statut`, `categorie`, `date_initial_min`, `date_initial_max`, `version`, `sort_by`, `order`
+
+### Import (`/import`)
+
+| Méthode | Endpoint | Description | Rôle |
+|---|---|---|---|
+| POST | `/import/sheets/preview` | Prévisualiser les feuilles Excel | Admin |
+| POST | `/import/nomenclature` | Importer (multi-feuilles) | Admin |
+| GET | `/import/duplicates` | Détecter les doublons | Admin |
+| POST | `/import/clean-duplicates` | Nettoyer les doublons (dry-run) | Admin |
+
+### Santé
+
+| Méthode | Endpoint | Description | Rôle |
+|---|---|---|---|
+| GET | `/health` | Statut API + dernière version importée | Public |
+
+---
+
+## Import Excel multi-feuilles
+
+Le fichier Excel contient 3 feuilles détectées automatiquement :
+
+| Feuille | Catégorie | Description |
+|---|---|---|
+| Nomenclature JUIN 2025 | `NOMENCLATURE` | Médicaments actifs (5 094 lignes) |
+| Non Renouvelés | `NON_RENOUVELE` | Enregistrements non renouvelés (1 905 lignes) |
+| RETRAIT | `RETRAIT` | Médicaments retirés (2 296 lignes) |
+
+```bash
+# Prévisualiser
+curl -X POST http://localhost:8000/import/sheets/preview \
+  -H "Authorization: Bearer <TOKEN>" \
+  -F "file=@nomenclature.xlsx"
+
+# Importer toutes les feuilles
+curl -X POST http://localhost:8000/import/nomenclature \
+  -H "Authorization: Bearer <TOKEN>" \
+  -F "file=@nomenclature.xlsx" \
+  -F "version=2025-06-30"
+
+# Importer une feuille spécifique
+curl -X POST http://localhost:8000/import/nomenclature \
+  -H "Authorization: Bearer <TOKEN>" \
+  -F "file=@nomenclature.xlsx" \
+  -F "version=2025-06-30" \
+  -F "sheet_names=RETRAIT"
+```
+
+---
+
+## Tests
+
+```bash
+# Lancer tous les tests (31 tests)
+python -m pytest tests/ -v
+
+# Par module
+python -m pytest tests/test_auth.py -v          # 7 tests auth
+python -m pytest tests/test_cache.py -v         # 5 tests cache
+python -m pytest tests/test_import.py -v        # 4 tests import
+python -m pytest tests/test_medicaments.py -v   # 15 tests CRUD/search/stats
+```
+
+---
+
+## Structure du projet
+
+```
+app/
+├── main.py                 # App FastAPI, lifespan, middleware logging
+├── core/
+│   ├── config.py           # Settings (pydantic-settings)
+│   ├── security.py         # JWT, hashing, dépendances auth
+│   └── cache.py            # Cache TTL en mémoire
+├── auth/
+│   ├── models.py           # Modèle User
+│   ├── schemas.py          # Schemas Pydantic auth
+│   ├── routes.py           # /auth/login, /auth/me, /auth/signup
+│   └── jwt.py              # Création de tokens
+├── medicaments/
+│   ├── models.py           # Modèle Medicament (+ catégorie, retrait)
+│   ├── schemas.py          # Schemas CRUD, pagination, dashboard, DCI
+│   ├── routes.py           # 9 endpoints médicaments
+│   └── crud.py             # Logique métier, recherche, export, stats
+├── importer/
+│   ├── excel_parser.py     # Parsing Excel multi-feuilles + normalisation
+│   └── routes.py           # Import, preview, doublons
+├── models/
+│   └── import_log.py       # Modèle ImportLog
+└── db/
+    ├── base.py             # DeclarativeBase
+    └── session.py          # Engine + SessionLocal async
+tests/
+├── conftest.py             # Fixtures (DB test, auth tokens)
+├── test_auth.py            # Tests authentification
+├── test_cache.py           # Tests cache TTL
+├── test_import.py          # Tests import
+└── test_medicaments.py     # Tests CRUD, recherche, stats, export
+alembic/
+├── env.py                  # Config Alembic async
+└── versions/
+    └── 002_add_categories.py  # Migration catégorie + retrait
+```
+
+---
+
+## Déploiement avec Docker
+
+### Prérequis
+
+- [Docker](https://docs.docker.com/get-docker/) ≥ 24.0
+- [Docker Compose](https://docs.docker.com/compose/install/) ≥ 2.20 (inclus avec Docker Desktop)
+
+### Démarrage rapide
+
+```bash
+# 1. Copier la configuration d'environnement
+cp .env.example .env
+
+# 2. Lancer l'API + PostgreSQL
+docker compose up -d
+
+# 3. Vérifier que tout est up
+docker compose ps
+```
+
+L'API est accessible sur **http://localhost:8000** :
+- Swagger : http://localhost:8000/docs
+- Health : http://localhost:8000/health
+
+### Configuration Docker
+
+Les variables sont définies dans `.env` (ou directement dans l'environnement) :
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `POSTGRES_USER` | `npp` | Utilisateur PostgreSQL |
+| `POSTGRES_PASSWORD` | `npp_secret` | Mot de passe PostgreSQL |
+| `POSTGRES_DB` | `nomenclature` | Nom de la base |
+| `SECRET_KEY` | `change-me-in-production` | Clé JWT (à changer en prod !) |
+| `ADMIN_EMAIL` | `admin@nomenclature.dz` | Email admin initial |
+| `ADMIN_PASSWORD` | `Admin2025!` | Mot de passe admin initial |
+| `RECREATE_TABLES` | `false` | `true` pour recréer les tables au 1er lancement |
+| `API_PORT` | `8000` | Port exposé sur l'hôte |
+| `DEBUG` | `false` | Mode debug |
+
+### Commandes utiles
+
+```bash
+# Démarrer (avec rebuild)
+docker compose up -d --build
+
+# Voir les logs en temps réel
+docker compose logs -f api
+
+# Arrêter
+docker compose down
+
+# Arrêter et supprimer les données (reset complet)
+docker compose down -v
+
+# Lancer les tests dans le conteneur
+docker compose exec api python -m pytest tests/ -v
+
+# Importer un fichier Excel
+docker compose cp nomenclature.xlsx api:/app/
+docker compose exec api python -c "print('File copied, use /import endpoint')"
+```
+
+### Architecture Docker
+
+```
+┌─────────────────────────────────────────────────┐
+│                  docker compose                  │
+│                                                  │
+│  ┌──────────┐         ┌───────────────────────┐ │
+│  │ postgres │ :5432 ← │         api           │ │
+│  │ 16-alpine│         │  gunicorn + uvicorn   │ │
+│  │          │         │  FastAPI on :8000      │ │
+│  └──────────┘         └───────────────────────┘ │
+│   volume:              exposed: ${API_PORT}:8000│
+│   postgres_data                                  │
+└─────────────────────────────────────────────────┘
+```
+
+### Build standalone (sans Compose)
+
+```bash
+# Build l'image
+docker build -t api-nomenclature .
+
+# Lancer avec une base externe
+docker run -d --name api-npp \
+  -p 8000:8000 \
+  -e DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/nomenclature \
+  -e SECRET_KEY=ma-cle-secrete \
+  -e RECREATE_TABLES=true \
+  api-nomenclature
+```
+
+---
+
+## Déploiement sur Render
+
+### 1. Préparer le repository
+
+```bash
+git init && git add . && git commit -m "Initial commit"
+git remote add origin https://github.com/<user>/api-nomenclature.git
+git push -u origin main
+```
+
+### 2. Créer la base PostgreSQL
+
+**Render Dashboard** > **New+** > **PostgreSQL** > Plan Free > copier l'**Internal Database URL**.
+
+### 3. Créer le Web Service
+
+**New+** > **Web Service** > connecter le repo GitHub.
+
+| Paramètre | Valeur |
+|---|---|
+| Build Command | `pip install --upgrade pip && pip install -r requirements.txt` |
+| Start Command | `gunicorn -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} app.main:app` |
+| Plan | Free |
+
+### 4. Variables d'environnement
+
+```env
+DATABASE_URL=postgresql+asyncpg://...   # URL interne Render
+SECRET_KEY=<clé-secrète-forte>
+ADMIN_EMAIL=admin@nomenclature.dz
+ADMIN_PASSWORD=<mot-de-passe-fort>
+RECREATE_TABLES=true                    # uniquement au 1er déploiement
+```
+
+> Retirer `RECREATE_TABLES` après le premier déploiement et utiliser Alembic pour les migrations futures.
+
+---
+
+## Licence
+
+Projet interne — Nomenclature nationale des produits pharmaceutiques.

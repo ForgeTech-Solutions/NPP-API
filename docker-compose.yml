@@ -1,0 +1,51 @@
+services:
+  # ─── PostgreSQL ─────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-npp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-npp_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-nomenclature}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - npp_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-npp} -d ${POSTGRES_DB:-nomenclature}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── API ────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-npp}:${POSTGRES_PASSWORD:-npp_secret}@db:5432/${POSTGRES_DB:-nomenclature}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@nomenclature.dz}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin2025!}
+      RECREATE_TABLES: ${RECREATE_TABLES:-false}
+      DEBUG: ${DEBUG:-false}
+    volumes:
+      - app_data:/app/data
+    networks:
+      - npp_network
+
+volumes:
+  postgres_data:
+  app_data:
+
+networks:
+  npp_network:
+    driver: bridge

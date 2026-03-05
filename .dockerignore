@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+venv/
+.venv/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+
+# Database files (rebuilt at runtime)
+*.db
+*.sqlite3
+
+# Excel data files
+*.xlsx
+*.xls
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation & config not needed in image
+README.md
+LICENCE
+Procfile
+render.yaml
+runtime.txt
+start.sh
+check_excel_columns.py

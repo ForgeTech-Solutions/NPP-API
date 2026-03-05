@@ -1,5 +1,8 @@
 """FastAPI main application."""
-from fastapi import FastAPI
+import logging
+import logging.config
+import time
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -12,25 +15,56 @@ from app.db.base import Base
 from app.auth.models import User
 from app.core.security import get_password_hash
 
+# ── Logging configuration ──────────────────────────────────────────────
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "format": "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+        "access": {
+            "format": "%(asctime)s | %(levelname)-8s | %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "default",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "loggers": {
+        "nomenclature": {"level": "INFO", "handlers": ["console"], "propagate": False},
+        "nomenclature.import": {"level": "INFO", "handlers": ["console"], "propagate": False},
+        "nomenclature.crud": {"level": "INFO", "handlers": ["console"], "propagate": False},
+        "nomenclature.auth": {"level": "INFO", "handlers": ["console"], "propagate": False},
+        "uvicorn": {"level": "INFO", "handlers": ["console"], "propagate": False},
+        "uvicorn.access": {"level": "INFO", "handlers": ["console"], "propagate": False},
+        "sqlalchemy.engine": {"level": "WARNING", "handlers": ["console"], "propagate": False},
+    },
+    "root": {"level": "INFO", "handlers": ["console"]},
+}
+
+logging.config.dictConfig(LOGGING_CONFIG)
+logger = logging.getLogger("nomenclature")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager.
-    Creates database tables and initial admin user on startup.
-    """
+    """Application lifespan manager: creates tables and initial admin user."""
     import os
     
-    # Create tables (drop first if RECREATE_TABLES is set)
     async with engine.begin() as conn:
         if os.environ.get("RECREATE_TABLES", "").lower() == "true":
-            print("⚠️  RECREATE_TABLES=true: Dropping all tables...")
+            logger.warning("RECREATE_TABLES=true: Dropping all tables...")
             await conn.run_sync(Base.metadata.drop_all)
-            print("✅ Tables dropped")
+            logger.info("Tables dropped")
         await conn.run_sync(Base.metadata.create_all)
-        print("✅ Tables created/verified")
+        logger.info("Tables created/verified")
     
-    # Create initial admin user if it doesn't exist
     from app.db.session import AsyncSessionLocal
     from sqlalchemy import select
     
@@ -47,22 +81,33 @@ async def lifespan(app: FastAPI):
             )
             session.add(admin_user)
             await session.commit()
-            print(f"✅ Initial admin user created: {settings.ADMIN_EMAIL}")
+            logger.info(f"Initial admin user created: {settings.ADMIN_EMAIL}")
         else:
-            print(f"ℹ️  Admin user already exists: {settings.ADMIN_EMAIL}")
+            logger.info(f"Admin user already exists: {settings.ADMIN_EMAIL}")
     
     yield
     
-    # Cleanup
     await engine.dispose()
+    logger.info("Application shutdown complete")
 
 
 # Create FastAPI app
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="API pour la nomenclature nationale des produits pharmaceutiques à usage humain",
-    lifespan=lifespan
+    description=(
+        "API pour la nomenclature nationale des produits pharmaceutiques à usage humain.\n\n"
+        "## Fonctionnalités\n"
+        "- **Authentification** JWT (Admin / Lecteur)\n"
+        "- **Import** multi-feuilles Excel (Nomenclature, Non Renouvelés, Retraits)\n"
+        "- **Recherche** full-text sur DCI, nom de marque, code, laboratoire\n"
+        "- **Export CSV** avec filtres\n"
+        "- **Dashboard** statistiques enrichies\n"
+        "- **Nettoyage** automatique des doublons\n"
+    ),
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 # Configure CORS
@@ -73,6 +118,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Request logging middleware ──────────────────────────────────────────
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log every request with method, path and duration."""
+    start = time.time()
+    response = await call_next(request)
+    duration_ms = (time.time() - start) * 1000
+    logger.info(
+        f"{request.method} {request.url.path} → {response.status_code} ({duration_ms:.0f}ms)"
+    )
+    return response
 
 
 # Health check endpoint

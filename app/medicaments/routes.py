@@ -1,158 +1,249 @@
 """Medicaments routes."""
+import math
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from datetime import date
+import io
 
 from app.medicaments.schemas import (
     MedicamentOut,
     MedicamentCreate,
     MedicamentUpdate,
     PaginatedResponse,
-    MedicamentStatistics
+    MedicamentStatistics,
+    DashboardStatistics,
+    DCIGroupResponse,
 )
 from app.medicaments import crud
 from app.auth.models import User
 from app.core.security import get_current_user, get_current_admin
+from app.core.cache import cache
 from app.db.session import get_db
 
 router = APIRouter(prefix="/medicaments", tags=["Medicaments"])
 
 
-@router.get("", response_model=PaginatedResponse[MedicamentOut])
+@router.get(
+    "",
+    response_model=PaginatedResponse[MedicamentOut],
+    summary="Lister les médicaments",
+    description="Liste paginée avec recherche full-text et 15+ filtres. "
+                "Le paramètre `q` recherche dans DCI, nom de marque, code et laboratoire."
+)
 async def list_medicaments(
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(50, ge=1, le=200, description="Items per page"),
-    q: Optional[str] = Query(None, description="Full-text search on DCI and nom_marque"),
-    dci: Optional[str] = Query(None, description="Filter by DCI"),
-    nom_marque: Optional[str] = Query(None, description="Filter by nom_marque"),
-    code: Optional[str] = Query(None, description="Filter by code"),
-    laboratoire: Optional[str] = Query(None, description="Filter by laboratoire"),
-    pays_laboratoire: Optional[str] = Query(None, description="Filter by pays_laboratoire"),
-    liste: Optional[str] = Query(None, description="Filter by liste"),
-    type: Optional[str] = Query(None, alias="type", description="Filter by type_medicament"),
-    statut: Optional[str] = Query(None, description="Filter by statut"),
-    date_initial_min: Optional[date] = Query(None, description="Minimum date_enregistrement_initial"),
-    date_initial_max: Optional[date] = Query(None, description="Maximum date_enregistrement_initial"),
-    version: Optional[str] = Query(None, description="Filter by version_nomenclature"),
+    page: int = Query(1, ge=1, description="Numéro de page"),
+    page_size: int = Query(50, ge=1, le=200, description="Éléments par page"),
+    q: Optional[str] = Query(None, description="Recherche full-text (DCI, nom_marque, code, laboratoire)"),
+    dci: Optional[str] = Query(None, description="Filtrer par DCI"),
+    nom_marque: Optional[str] = Query(None, description="Filtrer par nom de marque"),
+    code: Optional[str] = Query(None, description="Filtrer par code produit"),
+    num_enregistrement: Optional[str] = Query(None, description="Filtrer par numéro d'enregistrement"),
+    laboratoire: Optional[str] = Query(None, description="Filtrer par laboratoire"),
+    pays_laboratoire: Optional[str] = Query(None, description="Filtrer par pays du laboratoire"),
+    liste: Optional[str] = Query(None, description="Filtrer par liste (I, II)"),
+    type: Optional[str] = Query(None, alias="type", description="Filtrer par type (GE, RE, BIO)"),
+    statut: Optional[str] = Query(None, description="Filtrer par statut (F, I)"),
+    categorie: Optional[str] = Query(None, description="Filtrer par catégorie (NOMENCLATURE, NON_RENOUVELE, RETRAIT)"),
+    date_initial_min: Optional[date] = Query(None, description="Date d'enregistrement initial min"),
+    date_initial_max: Optional[date] = Query(None, description="Date d'enregistrement initial max"),
+    version: Optional[str] = Query(None, description="Filtrer par version nomenclature"),
+    sort_by: str = Query("id", description="Trier par: id, code, dci, nom_marque, laboratoire, pays_laboratoire, type_medicament, categorie, date_enregistrement_initial, created_at"),
+    order: str = Query("asc", description="Ordre de tri: asc ou desc"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    List and search medicaments with pagination and filters.
-    
-    Requires authentication (Lecteur or Admin).
-    """
+    """Liste et recherche de médicaments avec pagination, filtres et tri."""
     medicaments, total = await crud.get_medicaments(
-        db=db,
-        page=page,
-        page_size=page_size,
-        q=q,
-        dci=dci,
-        nom_marque=nom_marque,
-        code=code,
-        laboratoire=laboratoire,
-        pays_laboratoire=pays_laboratoire,
-        liste=liste,
-        type_medicament=type,
-        statut=statut,
-        date_initial_min=date_initial_min,
-        date_initial_max=date_initial_max,
-        version=version
+        db=db, page=page, page_size=page_size, q=q, dci=dci,
+        nom_marque=nom_marque, code=code, num_enregistrement=num_enregistrement,
+        laboratoire=laboratoire, pays_laboratoire=pays_laboratoire,
+        liste=liste, type_medicament=type, statut=statut, categorie=categorie,
+        date_initial_min=date_initial_min, date_initial_max=date_initial_max,
+        version=version, sort_by=sort_by, order=order
     )
+    
+    total_pages = math.ceil(total / page_size) if total > 0 else 0
     
     return PaginatedResponse(
         items=medicaments,
         total=total,
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        total_pages=total_pages,
+        has_next=page < total_pages,
+        has_previous=page > 1,
     )
 
 
-@router.get("/statistiques", response_model=MedicamentStatistics)
+@router.get(
+    "/statistiques",
+    response_model=MedicamentStatistics,
+    summary="Statistiques des médicaments",
+    description="Retourne les statistiques groupées par laboratoire, pays, type, catégorie et statut."
+)
 async def get_statistics(
+    categorie: Optional[str] = Query(None, description="Filtrer par catégorie"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Get medicament statistics.
-    
-    Requires authentication (Lecteur or Admin).
-    """
-    stats = await crud.get_statistics(db)
+    """Statistiques avec filtre optionnel par catégorie."""
+    cache_key = f"stats:{categorie or 'all'}"
+    cached = cache.get(cache_key)
+    if cached:
+        return MedicamentStatistics(**cached)
+    stats = await crud.get_statistics(db, categorie=categorie)
+    cache.set(cache_key, stats, ttl=300)
     return MedicamentStatistics(**stats)
 
 
-@router.get("/{medicament_id}", response_model=MedicamentOut)
+@router.get(
+    "/dashboard",
+    response_model=DashboardStatistics,
+    summary="Dashboard enrichi",
+    description="Statistiques enrichies avec top 10 laboratoires, top 10 pays, versions disponibles."
+)
+async def get_dashboard(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Dashboard avec statistiques enrichies."""
+    cached = cache.get("dashboard")
+    if cached:
+        return DashboardStatistics(**cached)
+    stats = await crud.get_dashboard_statistics(db)
+    cache.set("dashboard", stats, ttl=300)
+    return DashboardStatistics(**stats)
+
+
+@router.get(
+    "/export",
+    summary="Export CSV",
+    description="Exporter les médicaments filtrés au format CSV.",
+    responses={200: {"content": {"text/csv": {}}, "description": "Fichier CSV"}}
+)
+async def export_csv(
+    categorie: Optional[str] = Query(None, description="Filtrer par catégorie"),
+    version: Optional[str] = Query(None, description="Filtrer par version"),
+    type: Optional[str] = Query(None, alias="type", description="Filtrer par type"),
+    pays_laboratoire: Optional[str] = Query(None, description="Filtrer par pays"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Export CSV des médicaments avec filtres optionnels."""
+    csv_content = await crud.export_medicaments_csv(
+        db, categorie=categorie, version=version,
+        type_medicament=type, pays_laboratoire=pays_laboratoire
+    )
+    
+    return StreamingResponse(
+        io.StringIO(csv_content),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=medicaments_export.csv"}
+    )
+
+
+@router.get(
+    "/par-dci/{dci}",
+    response_model=DCIGroupResponse,
+    summary="Grouper par DCI",
+    description="Retrouver tous les médicaments (génériques, référence, retraits) d'une même DCI."
+)
+async def get_by_dci(
+    dci: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Tous les médicaments d'une même DCI (molécule)."""
+    medicaments, total = await crud.get_medicaments_by_dci(db, dci)
+    if total == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Aucun médicament trouvé pour la DCI: {dci}"
+        )
+    return DCIGroupResponse(dci=dci, total=total, medicaments=medicaments)
+
+
+@router.get(
+    "/{medicament_id}",
+    response_model=MedicamentOut,
+    summary="Détail d'un médicament",
+    description="Récupérer un médicament par son ID."
+)
 async def get_medicament(
     medicament_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Get a specific medicament by ID.
-    
-    Requires authentication (Lecteur or Admin).
-    """
+    """Détail d'un médicament par ID."""
     medicament = await crud.get_medicament_by_id(db, medicament_id)
     if not medicament:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Medicament not found"
+            detail="Médicament non trouvé"
         )
     return medicament
 
 
-@router.post("", response_model=MedicamentOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=MedicamentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Créer un médicament",
+    description="Créer un nouveau médicament. Requiert le rôle Admin."
+)
 async def create_medicament(
     medicament: MedicamentCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin)  # Admin only
+    current_user: User = Depends(get_current_admin)
 ):
-    """
-    Create a new medicament.
-    
-    Requires Admin role.
-    """
-    return await crud.create_medicament(db, medicament)
+    """Créer un médicament (Admin)."""
+    result = await crud.create_medicament(db, medicament)
+    cache.invalidate()  # Invalidate all stats caches
+    return result
 
 
-@router.put("/{medicament_id}", response_model=MedicamentOut)
+@router.put(
+    "/{medicament_id}",
+    response_model=MedicamentOut,
+    summary="Mettre à jour un médicament",
+    description="Mettre à jour un médicament existant. Requiert le rôle Admin."
+)
 async def update_medicament(
     medicament_id: int,
     medicament_update: MedicamentUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin)  # Admin only
+    current_user: User = Depends(get_current_admin)
 ):
-    """
-    Update a medicament.
-    
-    Requires Admin role.
-    """
+    """Mettre à jour un médicament (Admin)."""
     medicament = await crud.update_medicament(db, medicament_id, medicament_update)
     if not medicament:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Medicament not found"
+            detail="Médicament non trouvé"
         )
+    cache.invalidate()
     return medicament
 
 
-@router.delete("/{medicament_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{medicament_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Supprimer un médicament",
+    description="Suppression logique (soft delete). Requiert le rôle Admin."
+)
 async def delete_medicament(
     medicament_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin)  # Admin only
+    current_user: User = Depends(get_current_admin)
 ):
-    """
-    Delete a medicament (soft delete).
-    
-    Requires Admin role.
-    """
+    """Supprimer un médicament - soft delete (Admin)."""
     deleted = await crud.delete_medicament(db, medicament_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Medicament not found"
+            detail="Médicament non trouvé"
         )
+    cache.invalidate()
     return None

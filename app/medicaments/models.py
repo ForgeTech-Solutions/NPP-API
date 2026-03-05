@@ -1,6 +1,6 @@
 """Medicament database model."""
 from datetime import datetime, date
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Text, Index
 from app.db.base import Base
 
 
@@ -33,6 +33,13 @@ class Medicament(Base):
     statut = Column(String(50), nullable=False, index=True)
     duree_stabilite = Column(Text, nullable=True)
     
+    # Categorie: NOMENCLATURE, NON_RENOUVELE, RETRAIT
+    categorie = Column(String(50), nullable=False, default="NOMENCLATURE", index=True)
+    
+    # Retrait-specific fields
+    date_retrait = Column(Date, nullable=True)
+    motif_retrait = Column(Text, nullable=True)
+    
     # Metadata fields
     version_nomenclature = Column(String(50), nullable=False, index=True)
     source_fichier = Column(String(255), nullable=True)
@@ -40,5 +47,12 @@ class Medicament(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
+    # Composite indexes for performance
+    __table_args__ = (
+        Index('ix_medicaments_code_version', 'code', 'version_nomenclature'),
+        Index('ix_medicaments_categorie_version', 'categorie', 'version_nomenclature'),
+        Index('ix_medicaments_dci_nom', 'dci', 'nom_marque'),
+    )
+    
     def __repr__(self) -> str:
-        return f"<Medicament(id={self.id}, code={self.code}, dci={self.dci}, nom_marque={self.nom_marque})>"
+        return f"<Medicament(id={self.id}, code={self.code}, dci={self.dci}, nom_marque={self.nom_marque}, categorie={self.categorie})>"

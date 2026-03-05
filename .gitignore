@@ -50,6 +50,7 @@ htmlcov/
 
 # Logs
 *.log
+uvicorn.log
 
 # OS
 .DS_Store
@@ -60,3 +61,11 @@ alembic/versions/*.pyc
 
 # Uploaded files
 uploads/
+
+# Test artifacts
+tests/test.db
+/tmp/token*
+
+# Excel files (large data)
+*.xlsx
+*.xls
