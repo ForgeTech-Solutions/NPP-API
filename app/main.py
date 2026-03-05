@@ -61,14 +61,20 @@ logger = logging.getLogger("nomenclature")
 async def lifespan(app: FastAPI):
     """Application lifespan manager: creates tables and initial admin user."""
     import os
+    from sqlalchemy.exc import IntegrityError, ProgrammingError
     
     async with engine.begin() as conn:
         if os.environ.get("RECREATE_TABLES", "").lower() == "true":
             logger.warning("RECREATE_TABLES=true: Dropping all tables...")
             await conn.run_sync(Base.metadata.drop_all)
             logger.info("Tables dropped")
-        await conn.run_sync(Base.metadata.create_all)
-        logger.info("Tables created/verified")
+        try:
+            await conn.run_sync(Base.metadata.create_all)
+            logger.info("Tables created/verified")
+        except (IntegrityError, ProgrammingError) as e:
+            # Race condition: another worker already created the enum types / tables
+            logger.info(f"Tables already exist (parallel worker race): {e.__class__.__name__}")
+            await conn.rollback()
     
     from app.db.session import AsyncSessionLocal
     from sqlalchemy import select
