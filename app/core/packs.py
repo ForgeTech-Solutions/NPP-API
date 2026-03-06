@@ -128,3 +128,12 @@ def has_feature(pack: str, feature_key: str) -> bool:
 def get_rate_limit(pack: str) -> dict:
     """Return rate limit config for a pack."""
     return PACK_LIMITS.get(pack, PACK_LIMITS["FREE"])
+
+
+# ── API key limits per pack ────────────────────────────────────────────────
+API_KEY_LIMITS: dict[str, int] = {
+    "FREE": 1,
+    "PRO": 3,
+    "INSTITUTIONNEL": 5,
+    "DEVELOPPEUR": 10,
+}

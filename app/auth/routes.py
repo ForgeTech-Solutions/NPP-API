@@ -351,3 +351,142 @@ async def public_signup(
         "status": "pending_approval",
     }
 
+
+# ══════════════════════════════════════════════════════════════════════════
+#  API KEYS — Self-service
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.get(
+    "/me/api-keys",
+    summary="Lister mes clés API",
+    description="Retourne toutes vos clés API avec leur statut, date de dernière utilisation et compteur.",
+)
+async def list_my_api_keys(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Liste des clés API de l'utilisateur connecté."""
+    from app.models.api_key import ApiKey
+    from app.core.packs import API_KEY_LIMITS
+
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.user_id == current_user.id).order_by(ApiKey.created_at.desc())
+    )
+    keys = result.scalars().all()
+
+    max_keys = API_KEY_LIMITS.get(current_user.pack, 1)
+
+    return {
+        "api_keys": [
+            {
+                "id": k.id,
+                "name": k.name,
+                "key_prefix": k.key_prefix,
+                "is_active": k.is_active,
+                "created_at": k.created_at.isoformat() if k.created_at else None,
+                "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+                "last_used_ip": k.last_used_ip,
+                "requests_count": k.requests_count or 0,
+            }
+            for k in keys
+        ],
+        "total": len(keys),
+        "max_keys": max_keys,
+        "remaining_slots": max(0, max_keys - len(keys)),
+    }
+
+
+@router.post(
+    "/me/api-keys",
+    status_code=status.HTTP_201_CREATED,
+    summary="Créer une clé API",
+    description=(
+        "Génère une nouvelle clé API permanente liée à votre compte et votre pack. "
+        "**La clé complète n'est affichée qu'une seule fois** — copiez-la immédiatement."
+    ),
+)
+async def create_my_api_key(
+    name: str = "Ma clé API",
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Crée une clé API pour l'utilisateur connecté."""
+    from app.models.api_key import ApiKey, generate_api_key, hash_api_key
+    from app.core.packs import API_KEY_LIMITS
+
+    max_keys = API_KEY_LIMITS.get(current_user.pack, 1)
+
+    # Count existing keys
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.user_id == current_user.id)
+    )
+    existing = result.scalars().all()
+
+    if len(existing) >= max_keys:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "api_key_limit_reached",
+                "message": f"Limite de {max_keys} clé(s) API atteinte pour le pack {current_user.pack}.",
+                "current_count": len(existing),
+                "max_keys": max_keys,
+                "upgrade_hint": "Contactez un administrateur pour changer de pack.",
+            },
+        )
+
+    # Generate
+    raw_key = generate_api_key()
+    key_hash = hash_api_key(raw_key)
+    key_prefix = ApiKey.mask_key(raw_key)
+
+    api_key = ApiKey(
+        user_id=current_user.id,
+        name=name.strip()[:100],
+        key_hash=key_hash,
+        key_prefix=key_prefix,
+        is_active=True,
+    )
+    db.add(api_key)
+    await db.commit()
+    await db.refresh(api_key)
+
+    return {
+        "message": "Clé API créée. Copiez-la maintenant — elle ne sera plus affichée.",
+        "api_key": raw_key,
+        "id": api_key.id,
+        "name": api_key.name,
+        "key_prefix": key_prefix,
+        "pack": current_user.pack,
+        "created_at": api_key.created_at.isoformat() if api_key.created_at else None,
+    }
+
+
+@router.delete(
+    "/me/api-keys/{key_id}",
+    summary="Révoquer une clé API",
+    description="Supprime définitivement l'une de vos clés API.",
+)
+async def delete_my_api_key(
+    key_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Révoque (supprime) une clé API de l'utilisateur connecté."""
+    from app.models.api_key import ApiKey
+
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == current_user.id)
+    )
+    api_key = result.scalar_one_or_none()
+
+    if api_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Clé API introuvable ou ne vous appartient pas.",
+        )
+
+    await db.delete(api_key)
+    await db.commit()
+
+    return {"message": "Clé API révoquée avec succès.", "id": key_id}
+

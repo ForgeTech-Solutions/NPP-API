@@ -20,6 +20,7 @@ from app.db.session import engine
 from app.db.base import Base
 from app.auth.models import User
 from app.models.service_meta import ServiceMeta
+from app.models.api_key import ApiKey  # noqa: F401 — ensure table is created
 from app.core.security import get_password_hash
 
 # ── Logging configuration ──────────────────────────────────────────────

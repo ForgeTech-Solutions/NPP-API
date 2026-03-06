@@ -1,9 +1,9 @@
-"""Security utilities: password hashing, JWT verification, pack guards, rate limiter."""
+"""Security utilities: password hashing, JWT verification, API key auth, pack guards, rate limiter."""
 from datetime import datetime, timedelta, date, timezone
 from typing import Optional, List
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -18,7 +18,7 @@ from app.db.session import get_db
 ALGIERS_TZ = ZoneInfo("Africa/Algiers")  # GMT+1
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)  # auto_error=False to allow API key fallback
 
 
 # ── Password helpers ───────────────────────────────────────────────────────
@@ -51,12 +51,59 @@ def decode_access_token(token: str) -> Optional[dict]:
 
 # ── Core auth dependencies ─────────────────────────────────────────────────
 
+async def _authenticate_via_api_key(raw_key: str, db: AsyncSession, request: Request):
+    """Authenticate by API key. Returns User or raises 401."""
+    from app.auth.models import User
+    from app.models.api_key import ApiKey, hash_api_key
+
+    key_hash = hash_api_key(raw_key)
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.key_hash == key_hash)
+    )
+    api_key = result.scalar_one_or_none()
+
+    if api_key is None or not api_key.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Clé API invalide ou désactivée",
+        )
+
+    user = api_key.user
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Compte désactivé")
+    if not user.is_approved:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Compte en attente de validation")
+
+    # Update usage stats (non-blocking best effort)
+    api_key.last_used_at = datetime.utcnow()
+    api_key.last_used_ip = request.client.host if request.client else None
+    api_key.requests_count = (api_key.requests_count or 0) + 1
+    db.add(api_key)
+    await db.commit()
+
+    return user
+
+
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db),
 ):
-    """Validate JWT and return the authenticated user."""
+    """Authenticate via JWT Bearer OR X-API-Key header."""
     from app.auth.models import User
+
+    # 1. Try X-API-Key header first
+    api_key_header = request.headers.get("X-API-Key")
+    if api_key_header:
+        return await _authenticate_via_api_key(api_key_header, db, request)
+
+    # 2. Fallback to JWT Bearer
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token Bearer ou clé API (X-API-Key) requis",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

@@ -415,3 +415,194 @@ async def admin_stats(
         "inactive": sum(1 for u in users if not u.is_active),
         "by_pack": by_pack,
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  API KEYS MANAGEMENT (Admin)
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.get(
+    "/api-keys",
+    summary="Lister toutes les clés API",
+    description="Vue admin de toutes les clés API avec informations utilisateur, pack et usage.",
+)
+async def admin_list_api_keys(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    user_id: Optional[int] = Query(None, description="Filtrer par utilisateur"),
+    is_active: Optional[bool] = Query(None, description="Filtrer par statut actif"),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    """Liste paginée de toutes les clés API."""
+    from app.models.api_key import ApiKey
+
+    query = select(ApiKey).order_by(ApiKey.created_at.desc())
+    count_query = select(func.count()).select_from(ApiKey)
+
+    if user_id is not None:
+        query = query.where(ApiKey.user_id == user_id)
+        count_query = count_query.where(ApiKey.user_id == user_id)
+    if is_active is not None:
+        query = query.where(ApiKey.is_active == is_active)
+        count_query = count_query.where(ApiKey.is_active == is_active)
+
+    total = await db.scalar(count_query)
+    offset = (page - 1) * page_size
+    result = await db.execute(query.offset(offset).limit(page_size))
+    keys = result.scalars().all()
+
+    return {
+        "api_keys": [
+            {
+                "id": k.id,
+                "user_id": k.user_id,
+                "user_email": k.user.email if k.user else None,
+                "user_pack": k.user.pack if k.user else None,
+                "name": k.name,
+                "key_prefix": k.key_prefix,
+                "is_active": k.is_active,
+                "created_at": k.created_at.isoformat() if k.created_at else None,
+                "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+                "last_used_ip": k.last_used_ip,
+                "requests_count": k.requests_count or 0,
+            }
+            for k in keys
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get(
+    "/api-keys/{key_id}",
+    summary="Détail d'une clé API",
+    description="Voir le détail complet d'une clé API.",
+)
+async def admin_get_api_key(
+    key_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    """Détail d'une clé API."""
+    from app.models.api_key import ApiKey
+
+    result = await db.execute(select(ApiKey).where(ApiKey.id == key_id))
+    api_key = result.scalar_one_or_none()
+
+    if api_key is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clé API introuvable.")
+
+    return {
+        "id": api_key.id,
+        "user_id": api_key.user_id,
+        "user_email": api_key.user.email if api_key.user else None,
+        "user_pack": api_key.user.pack if api_key.user else None,
+        "user_full_name": api_key.user.full_name if api_key.user else None,
+        "name": api_key.name,
+        "key_prefix": api_key.key_prefix,
+        "is_active": api_key.is_active,
+        "created_at": api_key.created_at.isoformat() if api_key.created_at else None,
+        "last_used_at": api_key.last_used_at.isoformat() if api_key.last_used_at else None,
+        "last_used_ip": api_key.last_used_ip,
+        "requests_count": api_key.requests_count or 0,
+    }
+
+
+@router.patch(
+    "/api-keys/{key_id}",
+    summary="Activer/désactiver une clé API",
+    description="L'administrateur peut activer ou désactiver une clé API.",
+)
+async def admin_toggle_api_key(
+    key_id: int,
+    is_active: bool,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    """Active ou désactive une clé API."""
+    from app.models.api_key import ApiKey
+
+    result = await db.execute(select(ApiKey).where(ApiKey.id == key_id))
+    api_key = result.scalar_one_or_none()
+
+    if api_key is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clé API introuvable.")
+
+    api_key.is_active = is_active
+    db.add(api_key)
+    await db.commit()
+
+    action = "activée" if is_active else "désactivée"
+    return {"message": f"Clé API {action}.", "id": key_id, "is_active": is_active}
+
+
+@router.delete(
+    "/api-keys/{key_id}",
+    summary="Supprimer une clé API",
+    description="Supprime définitivement une clé API.",
+)
+async def admin_delete_api_key(
+    key_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    """Supprime une clé API."""
+    from app.models.api_key import ApiKey
+
+    result = await db.execute(select(ApiKey).where(ApiKey.id == key_id))
+    api_key = result.scalar_one_or_none()
+
+    if api_key is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clé API introuvable.")
+
+    await db.delete(api_key)
+    await db.commit()
+
+    return {"message": "Clé API supprimée définitivement.", "id": key_id}
+
+
+@router.get(
+    "/users/{user_id}/api-keys",
+    summary="Clés API d'un utilisateur",
+    description="Voir toutes les clés API d'un utilisateur spécifique.",
+)
+async def admin_user_api_keys(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    """Clés API d'un utilisateur."""
+    from app.models.api_key import ApiKey
+
+    # Vérifier que l'utilisateur existe
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur introuvable.")
+
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.user_id == user_id).order_by(ApiKey.created_at.desc())
+    )
+    keys = result.scalars().all()
+
+    return {
+        "user_id": user_id,
+        "user_email": user.email,
+        "user_pack": user.pack,
+        "api_keys": [
+            {
+                "id": k.id,
+                "name": k.name,
+                "key_prefix": k.key_prefix,
+                "is_active": k.is_active,
+                "created_at": k.created_at.isoformat() if k.created_at else None,
+                "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+                "last_used_ip": k.last_used_ip,
+                "requests_count": k.requests_count or 0,
+            }
+            for k in keys
+        ],
+        "total": len(keys),
+    }
