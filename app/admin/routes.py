@@ -800,6 +800,107 @@ async def email_status(_: User = Depends(get_current_admin)):
     }
 
 
+@router.get(
+    "/email/debug",
+    summary="Debug Graph API token",
+    description=(
+        "Décode le token Graph API et affiche les permissions (roles) accordées. "
+        "Vérifie aussi que la boîte mail expéditrice existe dans le tenant."
+    ),
+    tags=["Administration", "Email"],
+    responses={
+        200: {"description": "Diagnostic complet", "content": {"application/json": {"example": {
+            "token_acquired": True,
+            "token_roles": ["Mail.Send"],
+            "mail_send_granted": True,
+            "mail_from": "npp@nhaddag.net",
+            "mailbox_check": "OK (200)",
+            "diagnosis": "Tout est correctement configuré.",
+        }}}},
+    },
+)
+async def email_debug(_: User = Depends(get_current_admin)):
+    """Diagnostic complet : token claims, permissions, et vérification de la boîte mail."""
+    import json as _json
+    import base64
+    import httpx
+    from app.core.config import settings
+
+    result = {
+        "mail_from": settings.MAIL_FROM or "(non configuré)",
+        "tenant_id": settings.MICROSOFT_TENANT_ID[:8] + "..." if settings.MICROSOFT_TENANT_ID else None,
+        "client_id": settings.MICROSOFT_CLIENT_ID[:8] + "..." if settings.MICROSOFT_CLIENT_ID else None,
+        "token_acquired": False,
+        "token_error": None,
+        "token_roles": [],
+        "token_audience": None,
+        "token_issuer": None,
+        "mail_send_granted": False,
+        "mailbox_check": None,
+        "diagnosis": [],
+    }
+
+    # 1) Acquire token
+    try:
+        from app.core.email import _acquire_token
+        token = _acquire_token()
+        result["token_acquired"] = True
+    except Exception as e:
+        result["token_error"] = str(e)
+        result["diagnosis"].append(f"❌ Impossible d'obtenir un token : {e}")
+        return result
+
+    # 2) Decode JWT payload (no signature verification — just inspection)
+    try:
+        parts = token.split(".")
+        payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)  # fix padding
+        payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
+        result["token_roles"] = payload.get("roles", [])
+        result["token_audience"] = payload.get("aud")
+        result["token_issuer"] = payload.get("iss")
+        result["token_app_displayname"] = payload.get("app_displayname")
+        result["token_expires"] = payload.get("exp")
+    except Exception as e:
+        result["diagnosis"].append(f"⚠️ Impossible de décoder le token : {e}")
+
+    # 3) Check Mail.Send permission
+    if "Mail.Send" in result["token_roles"]:
+        result["mail_send_granted"] = True
+    else:
+        result["diagnosis"].append(
+            f"❌ Permission 'Mail.Send' ABSENTE du token. Roles présents : {result['token_roles']}. "
+            "→ Allez dans Entra ID → App registrations → API permissions → Ajouter 'Mail.Send' (Application) → Grant admin consent."
+        )
+
+    # 4) Check mailbox exists
+    if settings.MAIL_FROM:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"https://graph.microsoft.com/v1.0/users/{settings.MAIL_FROM}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            if resp.status_code == 200:
+                data = resp.json()
+                result["mailbox_check"] = f"✅ Trouvé — {data.get('displayName', '')} ({data.get('mail', '')})"
+            elif resp.status_code == 404:
+                result["mailbox_check"] = f"❌ Boîte mail '{settings.MAIL_FROM}' introuvable dans le tenant"
+                result["diagnosis"].append(
+                    f"❌ L'utilisateur '{settings.MAIL_FROM}' n'existe pas dans le tenant Microsoft 365. "
+                    "Créez une boîte mail ou une shared mailbox, ou changez MAIL_FROM vers un utilisateur existant."
+                )
+            else:
+                result["mailbox_check"] = f"⚠️ Réponse inattendue ({resp.status_code}): {resp.text[:200]}"
+        except Exception as e:
+            result["mailbox_check"] = f"⚠️ Erreur de vérification : {e}"
+
+    # 5) Summary
+    if not result["diagnosis"]:
+        result["diagnosis"] = ["✅ Tout semble correctement configuré. Mail.Send est accordé et la boîte mail existe."]
+
+    return result
+
+
 @router.post(
     "/email/test",
     summary="Envoyer un email de test",
