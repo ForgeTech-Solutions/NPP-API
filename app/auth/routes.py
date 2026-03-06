@@ -182,6 +182,13 @@ async def change_my_password(
     db.add(current_user)
     await db.commit()
 
+    # Send password change confirmation email
+    from app.core.email import send_password_changed
+    await send_password_changed(
+        to_email=current_user.email,
+        full_name=current_user.full_name or current_user.email,
+    )
+
     return {"message": "Mot de passe modifié avec succès."}
 
 
@@ -342,6 +349,22 @@ async def public_signup(
     db.add(new_user)
     await db.commit()
 
+    # Send confirmation email to user + notification to admin
+    from app.core.email import send_signup_confirmation, send_admin_new_signup_notification
+    await send_signup_confirmation(
+        to_email=user_data.email,
+        full_name=user_data.full_name,
+        pack=pack,
+        organisation=user_data.organisation or "",
+    )
+    await send_admin_new_signup_notification(
+        user_email=user_data.email,
+        full_name=user_data.full_name,
+        pack=pack,
+        organisation=user_data.organisation or "",
+        message=user_data.message or "",
+    )
+
     return {
         "message": "Demande d'accès enregistrée. Un administrateur examinera votre demande. "
                    "Votre mot de passe vous sera communiqué par email après validation.",
@@ -449,6 +472,15 @@ async def create_my_api_key(
     db.add(api_key)
     await db.commit()
     await db.refresh(api_key)
+
+    # Send notification email
+    from app.core.email import send_api_key_created
+    await send_api_key_created(
+        to_email=current_user.email,
+        full_name=current_user.full_name or current_user.email,
+        key_name=api_key.name,
+        key_prefix=key_prefix,
+    )
 
     return {
         "message": "Clé API créée. Copiez-la maintenant — elle ne sera plus affichée.",

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f9;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f4f6f9;">
+<tr><td align="center" style="padding:40px 20px;">
+
+  <!-- Header -->
+  <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#1B4D8E;border-radius:12px 12px 0 0;">
+  <tr><td style="padding:30px 40px;text-align:center;">
+    <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:0.5px;">
+      💊 {{app_name}}
+    </h1>
+    <p style="margin:8px 0 0;color:#a8c4e0;font-size:13px;">
+      Nomenclature Nationale des Produits Pharmaceutiques
+    </p>
+  </td></tr>
+  </table>
+
+  <!-- Body -->
+  <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#ffffff;border-left:1px solid #e0e6ed;border-right:1px solid #e0e6ed;">
+  <tr><td style="padding:40px;">
+
+    <h2 style="margin:0 0 20px;color:#E67E22;font-size:20px;">
+      🔔 Nouvelle demande d'accès
+    </h2>
+
+    <p style="color:#2c3e50;font-size:15px;line-height:1.7;">
+      Un nouvel utilisateur a soumis une demande d'accès à la plateforme.
+    </p>
+
+    <!-- User details -->
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:24px 0;">
+    <tr><td style="background:#fef9f0;border-radius:8px;padding:20px;border-left:4px solid #E67E22;">
+      <p style="margin:0 0 12px;color:#E67E22;font-size:12px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Détails de la demande</p>
+      <table role="presentation" cellspacing="0" cellpadding="6" style="font-size:14px;color:#2c3e50;width:100%;">
+        <tr>
+          <td style="font-weight:600;width:140px;vertical-align:top;">Nom complet</td>
+          <td>{{full_name}}</td>
+        </tr>
+        <tr>
+          <td style="font-weight:600;vertical-align:top;">Email</td>
+          <td>{{email}}</td>
+        </tr>
+        <tr>
+          <td style="font-weight:600;vertical-align:top;">Pack demandé</td>
+          <td><span style="background:#1B4D8E;color:#fff;padding:2px 10px;border-radius:4px;font-size:12px;">{{pack}}</span></td>
+        </tr>
+        <tr>
+          <td style="font-weight:600;vertical-align:top;">Organisation</td>
+          <td>{{organisation}}</td>
+        </tr>
+        <tr>
+          <td style="font-weight:600;vertical-align:top;">Message</td>
+          <td style="font-style:italic;color:#555;">{{message}}</td>
+        </tr>
+      </table>
+    </td></tr>
+    </table>
+
+    <p style="color:#2c3e50;font-size:15px;line-height:1.7;">
+      Connectez-vous au panneau d'administration pour approuver ou rejeter cette demande.
+    </p>
+
+    <!-- CTA Button -->
+    <table role="presentation" cellspacing="0" cellpadding="0" style="margin:24px 0;">
+    <tr><td style="background:#1B4D8E;border-radius:8px;">
+      <a href="https://npp.forge-solutions.tech/v1/docs" target="_blank"
+         style="display:inline-block;padding:14px 32px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;">
+        Accéder à l'administration →
+      </a>
+    </td></tr>
+    </table>
+
+  </td></tr>
+  </table>
+
+  <!-- Footer -->
+  <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#f8f9fb;border-radius:0 0 12px 12px;border:1px solid #e0e6ed;border-top:none;">
+  <tr><td style="padding:24px 40px;text-align:center;">
+    <p style="margin:0;color:#7f8c8d;font-size:12px;">
+      Notification automatique — {{app_name}}<br>
+      Cet email est destiné à l'administrateur de la plateforme.
+    </p>
+    <p style="margin:8px 0 0;color:#bdc3c7;font-size:11px;">
+      © 2025-2026 Forge Solutions — Tous droits réservés
+    </p>
+  </td></tr>
+  </table>
+
+</td></tr>
+</table>
+</body>
+</html>

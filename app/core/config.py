@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     # Reverse proxy prefix (e.g. /v1 when behind nginx)
     ROOT_PATH: str = ""
 
+    # ── Microsoft 365 Email (Graph API) ────────────────────────────────
+    MICROSOFT_TENANT_ID: str = ""
+    MICROSOFT_CLIENT_ID: str = ""
+    MICROSOFT_CLIENT_SECRET: str = ""
+    MAIL_FROM: str = ""          # e.g. noreply@nhaddag.net
+    MAIL_FROM_NAME: str = "NPP — Nomenclature Pharmaceutique"
+    MAIL_ENABLED: bool = False   # Set True once M365 creds are configured
+    ADMIN_NOTIFICATION_EMAIL: str = ""  # Admin receives signup notifications
+
     @model_validator(mode="after")
     def normalize_database_url(self):
         """Build a reliable DB URL for Docker and sanitize malformed values."""

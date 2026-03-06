@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f9;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f4f6f9;">
+<tr><td align="center" style="padding:40px 20px;">
+
+  <!-- Header -->
+  <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#1B4D8E;border-radius:12px 12px 0 0;">
+  <tr><td style="padding:30px 40px;text-align:center;">
+    <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:0.5px;">
+      💊 {{app_name}}
+    </h1>
+    <p style="margin:8px 0 0;color:#a8c4e0;font-size:13px;">
+      Nomenclature Nationale des Produits Pharmaceutiques
+    </p>
+  </td></tr>
+  </table>
+
+  <!-- Body -->
+  <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#ffffff;border-left:1px solid #e0e6ed;border-right:1px solid #e0e6ed;">
+  <tr><td style="padding:40px;">
+
+    <h2 style="margin:0 0 20px;color:#27AE60;font-size:20px;">
+      ✓ Configuration email fonctionnelle
+    </h2>
+
+    <p style="color:#2c3e50;font-size:15px;line-height:1.7;">
+      Ceci est un email de test envoyé depuis <strong>{{app_name}}</strong>.
+    </p>
+
+    <p style="color:#2c3e50;font-size:15px;line-height:1.7;">
+      Si vous recevez ce message, votre configuration Microsoft 365 Graph API est opérationnelle.
+    </p>
+
+    <!-- Success box -->
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:24px 0;">
+    <tr><td style="background:#eaf7ef;border-radius:8px;padding:20px;border-left:4px solid #27AE60;">
+      <p style="margin:0 0 12px;color:#27AE60;font-size:12px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Statut</p>
+      <table role="presentation" cellspacing="0" cellpadding="6" style="font-size:14px;color:#2c3e50;">
+        <tr>
+          <td style="font-weight:600;width:140px;">Service email</td>
+          <td><span style="color:#27AE60;font-weight:600;">✓ Opérationnel</span></td>
+        </tr>
+        <tr>
+          <td style="font-weight:600;">Destinataire</td>
+          <td>{{to_email}}</td>
+        </tr>
+        <tr>
+          <td style="font-weight:600;">Provider</td>
+          <td>Microsoft Graph API</td>
+        </tr>
+      </table>
+    </td></tr>
+    </table>
+
+    <!-- Features list -->
+    <p style="color:#2c3e50;font-size:15px;line-height:1.7;margin-bottom:8px;">
+      Les emails transactionnels suivants sont configurés :
+    </p>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 24px;">
+    <tr><td style="background:#f0f4f8;border-radius:8px;padding:20px;">
+      <table role="presentation" cellspacing="0" cellpadding="4" style="font-size:14px;color:#2c3e50;">
+        <tr><td>📩</td><td style="padding-left:8px;">Confirmation d'inscription</td></tr>
+        <tr><td>✅</td><td style="padding-left:8px;">Approbation de compte (avec mot de passe)</td></tr>
+        <tr><td>🚫</td><td style="padding-left:8px;">Rejet / désactivation de compte</td></tr>
+        <tr><td>🔑</td><td style="padding-left:8px;">Réinitialisation de mot de passe</td></tr>
+        <tr><td>🔒</td><td style="padding-left:8px;">Confirmation de changement de mot de passe</td></tr>
+        <tr><td>🗝️</td><td style="padding-left:8px;">Création de clé API</td></tr>
+        <tr><td>📦</td><td style="padding-left:8px;">Changement de pack</td></tr>
+        <tr><td>🔔</td><td style="padding-left:8px;">Notification admin (nouvelles inscriptions)</td></tr>
+      </table>
+    </td></tr>
+    </table>
+
+  </td></tr>
+  </table>
+
+  <!-- Footer -->
+  <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#f8f9fb;border-radius:0 0 12px 12px;border:1px solid #e0e6ed;border-top:none;">
+  <tr><td style="padding:24px 40px;text-align:center;">
+    <p style="margin:0;color:#7f8c8d;font-size:12px;">
+      Email de test — {{app_name}}<br>
+      Microsoft Graph API · Client Credentials Flow
+    </p>
+    <p style="margin:8px 0 0;color:#bdc3c7;font-size:11px;">
+      © 2025-2026 Forge Solutions — Tous droits réservés
+    </p>
+  </td></tr>
+  </table>
+
+</td></tr>
+</table>
+</body>
+</html>

@@ -8,6 +8,8 @@ API REST pour la gestion de la **nomenclature nationale des produits pharmaceuti
 - **Rate limiting** — 100 req/jour, 1 000 req/mois pour le pack FREE (minuit GMT+1)
 - **Inscription publique** — avec validation admin obligatoire
 - **Authentification JWT** — rôles Admin / Lecteur + pack
+- **Clés API** — authentification machine-to-machine (`X-API-Key`), limites par pack
+- **Emails transactionnels** — Microsoft 365 Graph API (inscription, approbation, reset password…)
 - **Import multi-feuilles** — Nomenclature, Non Renouvelés, Retraits (Excel)
 - **Recherche full-text** — DCI, nom de marque, code, laboratoire
 - **CRUD complet** — création, modification, suppression logique
@@ -27,7 +29,8 @@ API REST pour la gestion de la **nomenclature nationale des produits pharmaceuti
 | ORM | SQLAlchemy 2.0 (async) |
 | BDD dev | SQLite + aiosqlite |
 | BDD prod | PostgreSQL + asyncpg |
-| Auth | JWT (HS256, 30 min) |
+| Auth | JWT (HS256, 30 min) + API Keys (SHA-256) |
+| Email | Microsoft 365 Graph API (MSAL) |
 | Migrations | Alembic |
 | Serveur prod | Gunicorn + UvicornWorker |
 | Tests | pytest + pytest-asyncio + httpx |
@@ -59,6 +62,15 @@ DATABASE_URL=sqlite+aiosqlite:///./nomenclature.db   # dev
 SECRET_KEY=votre-cle-secrete
 ADMIN_EMAIL=admin@nomenclature.dz
 ADMIN_PASSWORD=Admin2025!
+
+# Microsoft 365 Email (optionnel — désactivé par défaut)
+MICROSOFT_TENANT_ID=
+MICROSOFT_CLIENT_ID=
+MICROSOFT_CLIENT_SECRET=
+MAIL_FROM=noreply@votredomaine.com
+MAIL_FROM_NAME=NPP — Nomenclature Pharmaceutique
+MAIL_ENABLED=false
+ADMIN_NOTIFICATION_EMAIL=admin@votredomaine.com
 ```
 
 ## Démarrage
@@ -101,7 +113,15 @@ curl -H "Authorization: Bearer <TOKEN>" http://localhost:8000/medicaments
 |---|---|---|---|
 | POST | `/auth/login` | Connexion (retourne JWT) | Public |
 | GET | `/auth/me` | Utilisateur courant | Auth |
-| POST | `/auth/signup` | Demander un accès (public, pending approval) | Public |
+| PATCH | `/auth/me` | Modifier profil (nom, tel, organisation) | Auth |
+| POST | `/auth/me/password` | Changer mot de passe | Auth |
+| GET | `/auth/me/stats` | Statistiques d'utilisation | Auth |
+| GET | `/auth/me/pack` | Détail de mon pack | Auth |
+| POST | `/auth/me/delete` | Supprimer mon compte | Auth |
+| POST | `/auth/signup` | Demander un accès (pending approval) | Public |
+| GET | `/auth/me/api-keys` | Lister mes clés API | Auth |
+| POST | `/auth/me/api-keys` | Créer une clé API | Auth |
+| DELETE | `/auth/me/api-keys/{id}` | Révoquer une clé API | Auth |
 
 ### Packs & Permissions
 
@@ -162,7 +182,16 @@ curl -H "Authorization: Bearer <TOKEN>" http://localhost:8000/medicaments
 | POST | `/admin/users/{id}/approve` | Approuver une inscription en attente |
 | POST | `/admin/users/{id}/pack` | Changer le pack d'un utilisateur |
 | DELETE | `/admin/users/{id}` | Désactiver un utilisateur (soft delete) |
+| POST | `/admin/users/{id}/reset-password` | Réinitialiser mot de passe + envoi email |
 | GET | `/admin/stats` | Statistiques admin (users par pack, statut) |
+| GET | `/admin/api-keys` | Lister toutes les clés API |
+| GET | `/admin/api-keys/{id}` | Détail d'une clé API |
+| PATCH | `/admin/api-keys/{id}` | Activer/désactiver une clé API |
+| DELETE | `/admin/api-keys/{id}` | Supprimer une clé API |
+| GET | `/admin/users/{id}/api-keys` | Clés API d'un utilisateur |
+| GET | `/admin/email/status` | Statut de la configuration email M365 |
+| POST | `/admin/email/test` | Envoyer un email de test |
+| POST | `/admin/email/send` | Envoyer un email personnalisé |
 
 ---
 
@@ -220,16 +249,19 @@ app/
 ├── main.py                 # App FastAPI, lifespan, middleware logging
 ├── core/
 │   ├── config.py           # Settings (pydantic-settings)
-│   ├── security.py         # JWT, hashing, pack guards, rate limiter
+│   ├── security.py         # JWT + API Key auth, pack guards, rate limiter
+│   ├── email.py            # Service email Microsoft 365 Graph API (MSAL)
 │   ├── cache.py            # Cache TTL en mémoire
-│   └── packs.py            # Définitions packs, features, limites
+│   └── packs.py            # Définitions packs, features, limites, API key limits
+├── templates/
+│   └── email/              # Templates HTML emails transactionnels (9 templates)
 ├── auth/
 │   ├── models.py           # Modèle User (rôle, pack, quotas)
 │   ├── schemas.py          # Schemas auth, PackDetail, QuotaInfo
-│   ├── routes.py           # /auth/login, /auth/me, /auth/signup
+│   ├── routes.py           # /auth/login, /auth/me, /auth/signup, /auth/me/api-keys
 │   └── jwt.py              # Création de tokens
 ├── admin/
-│   └── routes.py           # Gestion users, packs, approbations, stats
+│   └── routes.py           # Gestion users, packs, approbations, stats, email, API keys
 ├── medicaments/
 │   ├── models.py           # Modèle Medicament (+ catégorie, retrait)
 │   ├── schemas.py          # Schemas CRUD, pagination, dashboard, DCI
@@ -239,7 +271,9 @@ app/
 │   ├── excel_parser.py     # Parsing Excel multi-feuilles + normalisation
 │   └── routes.py           # Import, preview, doublons
 ├── models/
-│   └── import_log.py       # Modèle ImportLog
+│   ├── import_log.py       # Modèle ImportLog
+│   ├── api_key.py          # Modèle ApiKey (SHA-256, usage tracking)
+│   └── service_meta.py     # Métadonnées service (first_deployed_at)
 └── db/
     ├── base.py             # DeclarativeBase
     └── session.py          # Engine + SessionLocal async
@@ -297,6 +331,16 @@ Les variables sont définies dans `.env` (ou directement dans l'environnement) :
 | `RECREATE_TABLES` | `false` | `true` pour recréer les tables au 1er lancement |
 | `API_PORT` | `8000` | Port exposé sur l'hôte |
 | `DEBUG` | `false` | Mode debug |
+| `DOCS_USERNAME` | `admin` | HTTP Basic Auth pour /docs, /redoc |
+| `DOCS_PASSWORD` | `docs2025!` | Mot de passe protège la doc |
+| `ROOT_PATH` | `/v1` | Préfixe reverse proxy (nginx) |
+| `MICROSOFT_TENANT_ID` | _(vide)_ | Tenant ID Azure Entra ID |
+| `MICROSOFT_CLIENT_ID` | _(vide)_ | Client ID de l'App Registration |
+| `MICROSOFT_CLIENT_SECRET` | _(vide)_ | Client Secret |
+| `MAIL_FROM` | _(vide)_ | Adresse d'envoi (`noreply@domaine.com`) |
+| `MAIL_FROM_NAME` | `NPP — Nomenclature Pharmaceutique` | Nom affiché comme expéditeur |
+| `MAIL_ENABLED` | `false` | Activer l'envoi d'emails |
+| `ADMIN_NOTIFICATION_EMAIL` | _(vide)_ | Email recevant les notifications admin |
 
 ### Commandes utiles
 
@@ -389,6 +433,78 @@ RECREATE_TABLES=true                    # uniquement au 1er déploiement
 ```
 
 > Retirer `RECREATE_TABLES` après le premier déploiement et utiliser Alembic pour les migrations futures.
+
+---
+
+## Emails transactionnels (Microsoft 365)
+
+L'API envoie des emails automatiques via **Microsoft Graph API** pour les événements suivants :
+
+| Événement | Destinataire | Template |
+|---|---|---|
+| Inscription publique | Utilisateur | `signup_confirmation` |
+| Nouvelle inscription | Admin | `admin_new_signup` |
+| Compte approuvé (avec mot de passe) | Utilisateur | `account_approved` |
+| Compte désactivé/rejeté | Utilisateur | `account_rejected` |
+| Changement de mot de passe | Utilisateur | `password_changed` |
+| Réinitialisation mot de passe (admin) | Utilisateur | `password_reset` |
+| Création de clé API | Utilisateur | `api_key_created` |
+| Changement de pack | Utilisateur | `pack_changed` |
+
+### Configuration Microsoft Entra ID
+
+1. Aller sur [portal.azure.com](https://portal.azure.com) → **Microsoft Entra ID** → **App Registrations**
+2. **New Registration** → nom : `NPP-API-Email` → type : `Accounts in this organizational directory only`
+3. **API Permissions** → **Add** → **Microsoft Graph** → **Application** → `Mail.Send` → **Grant admin consent**
+4. **Certificates & secrets** → **New client secret** → copier la valeur
+5. Copier `Tenant ID`, `Application (Client) ID` et `Client Secret Value`
+6. Configurer dans `.env` :
+
+```env
+MICROSOFT_TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+MICROSOFT_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+MICROSOFT_CLIENT_SECRET=votre-secret
+MAIL_FROM=noreply@votredomaine.com
+MAIL_ENABLED=true
+ADMIN_NOTIFICATION_EMAIL=admin@votredomaine.com
+```
+
+> **Important** : `MAIL_FROM` doit être une boîte aux lettres existante dans votre tenant Microsoft 365.
+
+### Tester la configuration
+
+```bash
+# Vérifier le statut
+curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
+  https://votre-api.com/v1/admin/email/status
+
+# Envoyer un email de test
+curl -X POST -H "Authorization: Bearer <ADMIN_TOKEN>" \
+  "https://votre-api.com/v1/admin/email/test?to_email=votre@email.com"
+```
+
+---
+
+## Clés API (Machine-to-Machine)
+
+En plus du JWT, l'API supporte l'authentification par clé API via l'en-tête `X-API-Key`.
+
+| Pack | Nombre max de clés |
+|---|---|
+| FREE | 1 |
+| PRO | 3 |
+| INSTITUTIONNEL | 5 |
+| DÉVELOPPEUR | 10 |
+
+```bash
+# Créer une clé API (authentifié JWT)
+curl -X POST -H "Authorization: Bearer <TOKEN>" \
+  "https://votre-api.com/v1/auth/me/api-keys?name=Mon+App"
+
+# Utiliser la clé API
+curl -H "X-API-Key: npp_xxxxxxxxxxxxxxxx" \
+  https://votre-api.com/v1/medicaments
+```
 
 ---
 

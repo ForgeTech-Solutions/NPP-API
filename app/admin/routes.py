@@ -318,6 +318,15 @@ async def approve_user(
     await db.commit()
     await db.refresh(user)
 
+    # Send approval email with credentials
+    from app.core.email import send_account_approved
+    email_sent = await send_account_approved(
+        to_email=user.email,
+        full_name=user.full_name or user.email,
+        pack=pack_val,
+        password=plain_password,
+    )
+
     return {
         "message": f"Utilisateur {user.email} approuvé avec le pack {pack_val}.",
         "user_id": user.id,
@@ -325,7 +334,8 @@ async def approve_user(
         "full_name": user.full_name,
         "pack": pack_val,
         "generated_password": plain_password,
-        "note": "Communiquez ce mot de passe à l'utilisateur par email.",
+        "email_sent": email_sent,
+        "note": "Les identifiants ont été envoyés par email." if email_sent else "Communiquez ce mot de passe à l'utilisateur manuellement.",
     }
 
 
@@ -354,12 +364,23 @@ async def change_pack(
             detail=f"Pack invalide. Valeurs acceptées : {', '.join([p.value for p in PackType])}",
         )
 
+    old_pack = user.pack
     user.pack = pack_val
     user.requests_today = 0
     user.requests_month = 0
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    # Notify user of pack change
+    from app.core.email import send_pack_changed
+    await send_pack_changed(
+        to_email=user.email,
+        full_name=user.full_name or user.email,
+        old_pack=str(old_pack),
+        new_pack=pack_val,
+    )
+
     return _build_user_out(user)
 
 
@@ -383,6 +404,15 @@ async def deactivate_user(
     user.is_active = False
     db.add(user)
     await db.commit()
+
+    # Notify user of account deactivation
+    from app.core.email import send_account_rejected
+    await send_account_rejected(
+        to_email=user.email,
+        full_name=user.full_name or user.email,
+        reason="Votre compte a été désactivé par un administrateur.",
+    )
+
     return {"message": f"Utilisateur {user.email} désactivé", "user_id": user_id}
 
 
@@ -605,4 +635,147 @@ async def admin_user_api_keys(
             for k in keys
         ],
         "total": len(keys),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  EMAIL MANAGEMENT (Admin)
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.get(
+    "/email/status",
+    summary="Statut du service email",
+    description="Vérifie la configuration Microsoft 365 Graph API pour l'envoi d'emails.",
+    tags=["Administration", "Email"],
+)
+async def email_status(_: User = Depends(get_current_admin)):
+    """État de la configuration email Microsoft 365."""
+    from app.core.config import settings
+
+    configured = all([
+        settings.MICROSOFT_TENANT_ID,
+        settings.MICROSOFT_CLIENT_ID,
+        settings.MICROSOFT_CLIENT_SECRET,
+        settings.MAIL_FROM,
+    ])
+
+    return {
+        "enabled": settings.MAIL_ENABLED,
+        "configured": configured,
+        "provider": "Microsoft Graph API",
+        "mail_from": settings.MAIL_FROM or "(non configuré)",
+        "mail_from_name": settings.MAIL_FROM_NAME,
+        "admin_notification_email": settings.ADMIN_NOTIFICATION_EMAIL or "(non configuré)",
+        "tenant_id_set": bool(settings.MICROSOFT_TENANT_ID),
+        "client_id_set": bool(settings.MICROSOFT_CLIENT_ID),
+        "client_secret_set": bool(settings.MICROSOFT_CLIENT_SECRET),
+        "templates": [
+            "signup_confirmation",
+            "admin_new_signup",
+            "account_approved",
+            "account_rejected",
+            "password_changed",
+            "password_reset",
+            "api_key_created",
+            "pack_changed",
+            "test_email",
+        ],
+    }
+
+
+@router.post(
+    "/email/test",
+    summary="Envoyer un email de test",
+    description="Envoie un email de test pour vérifier que la configuration M365 fonctionne.",
+    tags=["Administration", "Email"],
+)
+async def send_test(
+    to_email: str = Query(..., description="Adresse email du destinataire"),
+    _: User = Depends(get_current_admin),
+):
+    """Envoyer un email de test via Microsoft Graph API."""
+    from app.core.email import send_test_email
+
+    success = await send_test_email(to_email=to_email)
+
+    if success:
+        return {"message": f"Email de test envoyé à {to_email}", "success": True}
+    else:
+        return {
+            "message": "Échec de l'envoi. Vérifiez la configuration M365 et les logs.",
+            "success": False,
+            "hint": "Assurez-vous que MAIL_ENABLED=true et que les credentials M365 sont corrects.",
+        }
+
+
+@router.post(
+    "/email/send",
+    summary="Envoyer un email personnalisé",
+    description="Envoie un email personnalisé à un utilisateur (corps HTML libre).",
+    tags=["Administration", "Email"],
+)
+async def send_custom_email(
+    to_email: str = Query(..., description="Adresse email du destinataire"),
+    subject: str = Query(..., description="Sujet de l'email"),
+    body_html: str = Query(..., description="Corps HTML de l'email"),
+    _: User = Depends(get_current_admin),
+):
+    """Envoyer un email personnalisé."""
+    from app.core.email import send_email
+
+    success = await send_email(
+        to_email=to_email,
+        subject=subject,
+        html_body=body_html,
+    )
+
+    return {"success": success, "to": to_email, "subject": subject}
+
+
+@router.post(
+    "/users/{user_id}/reset-password",
+    summary="Réinitialiser le mot de passe",
+    description=(
+        "Réinitialise le mot de passe d'un utilisateur et lui envoie "
+        "les nouveaux identifiants par email."
+    ),
+    tags=["Administration", "Email"],
+)
+async def admin_reset_password(
+    user_id: int,
+    new_password: Optional[str] = Query(None, description="Mot de passe (auto-généré si vide)"),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    """Réinitialiser le mot de passe d'un utilisateur et notifier par email."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur introuvable")
+
+    # Generate password if not provided
+    if new_password:
+        plain_password = new_password
+    else:
+        alphabet = string.ascii_letters + string.digits + "!@#$%&*"
+        plain_password = "".join(_secrets.choice(alphabet) for _ in range(16))
+
+    user.hashed_password = get_password_hash(plain_password)
+    db.add(user)
+    await db.commit()
+
+    # Send reset email
+    from app.core.email import send_password_reset
+    email_sent = await send_password_reset(
+        to_email=user.email,
+        full_name=user.full_name or user.email,
+        new_password=plain_password,
+    )
+
+    return {
+        "message": f"Mot de passe réinitialisé pour {user.email}",
+        "user_id": user.id,
+        "email": user.email,
+        "generated_password": plain_password,
+        "email_sent": email_sent,
     }
