@@ -208,7 +208,27 @@ _startup_time = datetime.utcnow()
 
 
 # Health check endpoint
-@app.get("/health", tags=["Health"])
+@app.get(
+    "/health",
+    tags=["Health"],
+    summary="État de santé de l'API",
+    description="Vérifie que l'API et la base de données fonctionnent. Retourne les statistiques de la base et l'uptime.",
+    responses={
+        200: {"description": "API en bonne santé", "content": {"application/json": {"example": {
+            "status": "ok",
+            "version": "2.1.0",
+            "uptime": "12h 34m 56s",
+            "uptime_seconds": 45296,
+            "uptime_percent": 99.87,
+            "deployed_since": "2026-01-10T08:00:00",
+            "db_latency_ms": 2.45,
+            "total_medicaments": 12345,
+            "total_laboratoires": 380,
+            "derniere_mise_a_jour": "2025-06-30",
+            "derniere_mise_a_jour_date": "2026-03-01T14:30:00",
+        }}}},
+    },
+)
 async def health_check():
     """Check API health status with database stats and uptime percentage."""
     from app.db.session import AsyncSessionLocal
@@ -286,7 +306,27 @@ async def health_check():
 
 
 # ── Public pack catalog (no auth required) ─────────────────────────────
-@app.get("/packs", tags=["Packs"], summary="Catalogue des packs (public)")
+@app.get(
+    "/packs",
+    tags=["Packs"],
+    summary="Catalogue des packs (public)",
+    description="Liste publique des packs disponibles avec fonctionnalités, limites et cibles. Aucune authentification requise.",
+    responses={
+        200: {"description": "Catalogue complet des packs", "content": {"application/json": {"example": {
+            "packs": [
+                {"slug": "FREE", "name": "Free", "target": "Développeurs & Tests",
+                 "description": "Accès limité pour tests et développement.",
+                 "features": ["Recherche basique", "100 requêtes/jour"],
+                 "limitations": ["Pas d'export CSV", "Pas de statistiques"],
+                 "rate_limit_day": 100, "rate_limit_month": 1000, "requires_approval": False},
+                {"slug": "PRO", "name": "Pro", "target": "Pharmacies & Grossistes"},
+                {"slug": "INSTITUTIONNEL", "name": "Institutionnel", "target": "Établissements de santé"},
+                {"slug": "DEVELOPPEUR", "name": "Développeur", "target": "Intégrateurs & Partenaires"},
+            ],
+            "total": 4,
+        }}}},
+    },
+)
 async def public_pack_catalog():
     """Liste publique des packs disponibles avec fonctionnalités et limites."""
     from app.core.packs import PACK_CATALOG

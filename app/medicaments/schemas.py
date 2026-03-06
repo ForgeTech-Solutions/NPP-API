@@ -85,27 +85,44 @@ class MedicamentUpdate(BaseModel):
 
 
 class MedicamentOut(MedicamentBase):
-    """Schema for medicament output.
-    
-    Example response:
-        ```json
-        {
-            "id": 1,
-            "code": "01 A 003",
-            "dci": "CETIRIZINE DICHLORHYDRATE",
-            "nom_marque": "ARTIZ",
-            "categorie": "NOMENCLATURE",
-            "type_medicament": "GE",
-            "pays_laboratoire": "ALGERIE"
-        }
-        ```
-    """
+    """Schema for medicament output."""
     id: int
     source_fichier: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={"example": {
+            "id": 1542,
+            "n": 1,
+            "num_enregistrement": "352/01 A 003/06/22",
+            "code": "01 A 003",
+            "dci": "CETIRIZINE DICHLORHYDRATE",
+            "nom_marque": "ARTIZ",
+            "forme": "COMPRIME PELLICULE SECABLE",
+            "dosage": "10MG",
+            "conditionnement": "B/10",
+            "liste": "LISTE II",
+            "p1": "HOP",
+            "p2": "OFF",
+            "obs": None,
+            "laboratoire": "EL KENDI",
+            "pays_laboratoire": "ALGERIE",
+            "date_enregistrement_initial": "2022-06-15",
+            "date_enregistrement_final": "2027-06-15",
+            "type_medicament": "GE",
+            "statut": "F",
+            "duree_stabilite": "60 MOIS",
+            "categorie": "NOMENCLATURE",
+            "date_retrait": None,
+            "motif_retrait": None,
+            "version_nomenclature": "2025-06-30",
+            "source_fichier": "nomenclature_2025.xlsx",
+            "created_at": "2026-01-10T09:00:00",
+            "updated_at": "2026-01-10T09:00:00",
+        }},
+    )
 
 
 T = TypeVar('T')
@@ -121,6 +138,16 @@ class PaginatedResponse(BaseModel, Generic[T]):
     has_next: bool = Field(description="Indique s'il y a une page suivante")
     has_previous: bool = Field(description="Indique s'il y a une page précédente")
 
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "items": ["(liste de médicaments)"],
+        "total": 12345,
+        "page": 1,
+        "page_size": 50,
+        "total_pages": 247,
+        "has_next": True,
+        "has_previous": False,
+    }})
+
 
 class MedicamentStatistics(BaseModel):
     """Schema for medicament statistics.
@@ -133,6 +160,15 @@ class MedicamentStatistics(BaseModel):
     par_type: dict[str, int] = Field(description="Répartition par type (GE, RE, BIO)")
     par_categorie: dict[str, int] = Field(description="Répartition par catégorie")
     par_statut: dict[str, int] = Field(description="Répartition par statut")
+
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "total": 12345,
+        "par_laboratoire": {"BIOPHARM": 820, "EL KENDI": 654, "SAIDAL": 1120, "SANOFI": 530},
+        "par_pays": {"ALGERIE": 5200, "FRANCE": 2100, "INDE": 1800, "JORDANIE": 900},
+        "par_type": {"GE": 8500, "RE": 3200, "BIO": 645},
+        "par_categorie": {"NOMENCLATURE": 10200, "NON_RENOUVELE": 1500, "RETRAIT": 645},
+        "par_statut": {"F": 11000, "I": 1345},
+    }})
 
 
 class DashboardStatistics(BaseModel):
@@ -147,9 +183,43 @@ class DashboardStatistics(BaseModel):
     top_10_pays: List[dict]
     versions_disponibles: List[str]
 
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "total_medicaments": 12345,
+        "total_laboratoires": 380,
+        "total_pays": 42,
+        "par_categorie": {"NOMENCLATURE": 10200, "NON_RENOUVELE": 1500, "RETRAIT": 645},
+        "par_type": {"GE": 8500, "RE": 3200, "BIO": 645},
+        "par_statut": {"F": 11000, "I": 1345},
+        "top_10_laboratoires": [
+            {"laboratoire": "SAIDAL", "count": 1120},
+            {"laboratoire": "BIOPHARM", "count": 820},
+        ],
+        "top_10_pays": [
+            {"pays": "ALGERIE", "count": 5200},
+            {"pays": "FRANCE", "count": 2100},
+        ],
+        "versions_disponibles": ["2025-06-30", "2024-12-31"],
+    }})
+
 
 class DCIGroupResponse(BaseModel):
     """Schema for DCI group response."""
     dci: str
     total: int
     medicaments: List[MedicamentOut]
+
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "dci": "CETIRIZINE DICHLORHYDRATE",
+        "total": 5,
+        "medicaments": [
+            {
+                "id": 1542, "code": "01 A 003", "dci": "CETIRIZINE DICHLORHYDRATE",
+                "nom_marque": "ARTIZ", "forme": "COMPRIME PELLICULE SECABLE",
+                "dosage": "10MG", "conditionnement": "B/10",
+                "laboratoire": "EL KENDI", "pays_laboratoire": "ALGERIE",
+                "type_medicament": "GE", "statut": "F",
+                "categorie": "NOMENCLATURE", "version_nomenclature": "2025-06-30",
+                "created_at": "2026-01-10T09:00:00", "updated_at": "2026-01-10T09:00:00",
+            }
+        ],
+    }})

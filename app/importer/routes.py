@@ -30,11 +30,29 @@ class SheetPreview(BaseModel):
     columns: List[str]
     error: Optional[str] = None
 
+    model_config = {"json_schema_extra": {"example": {
+        "name": "Nomenclature",
+        "rows": 8542,
+        "detected_type": "medicaments",
+        "detected_category": "NOMENCLATURE",
+        "columns": ["N", "NUM_ENREGISTREMENT", "CODE", "DCI", "NOM_MARQUE", "FORME", "DOSAGE", "CONDITIONNEMENT", "LISTE", "LABORATOIRE", "PAYS_LABORATOIRE"],
+        "error": None,
+    }}}
+
 
 class SheetsPreviewResponse(BaseModel):
     """Schema for sheets preview response."""
     filename: str
     sheets: List[SheetPreview]
+
+    model_config = {"json_schema_extra": {"example": {
+        "filename": "nomenclature_2025.xlsx",
+        "sheets": [
+            {"name": "Nomenclature", "rows": 8542, "detected_type": "medicaments", "detected_category": "NOMENCLATURE", "columns": ["N", "CODE", "DCI", "NOM_MARQUE"], "error": None},
+            {"name": "Non Renouvelés", "rows": 1200, "detected_type": "medicaments", "detected_category": "NON_RENOUVELE", "columns": ["N", "CODE", "DCI", "NOM_MARQUE"], "error": None},
+            {"name": "Retraits", "rows": 645, "detected_type": "medicaments", "detected_category": "RETRAIT", "columns": ["N", "CODE", "DCI", "NOM_MARQUE", "DATE_RETRAIT", "MOTIF_RETRAIT"], "error": None},
+        ],
+    }}}
 
 
 class SheetImportResult(BaseModel):
@@ -45,6 +63,12 @@ class SheetImportResult(BaseModel):
     category: str
     errors: List[dict]
 
+    model_config = {"json_schema_extra": {"example": {
+        "rows_inserted": 8500, "rows_updated": 42, "rows_ignored": 3,
+        "category": "NOMENCLATURE",
+        "errors": [{"row": 156, "message": "Champ code manquant"}],
+    }}}
+
 
 class ImportResponse(BaseModel):
     """Schema for import response."""
@@ -54,6 +78,17 @@ class ImportResponse(BaseModel):
     total_rows_inserted: int
     total_rows_updated: int
     available_sheets: List[str]
+
+    model_config = {"json_schema_extra": {"example": {
+        "version_nomenclature": "2025-06-30",
+        "source_fichier": "nomenclature_2025.xlsx",
+        "sheets_processed": {
+            "Nomenclature": {"rows_inserted": 8500, "rows_updated": 42, "rows_ignored": 3, "category": "NOMENCLATURE", "errors": []},
+            "Non Renouvelés": {"rows_inserted": 1200, "rows_updated": 0, "rows_ignored": 1, "category": "NON_RENOUVELE", "errors": []},
+        },
+        "total_rows_inserted": 9700, "total_rows_updated": 42,
+        "available_sheets": ["Nomenclature", "Non Renouvelés", "Retraits"],
+    }}}
 
 
 class ImportResult:
@@ -98,7 +133,11 @@ class ImportResult:
     "/sheets/preview",
     response_model=SheetsPreviewResponse,
     summary="Prévisualiser les feuilles Excel",
-    description="Voir les feuilles disponibles et leur catégorie détectée avant d'importer."
+    description="Voir les feuilles disponibles et leur catégorie détectée avant d'importer.",
+    responses={
+        400: {"description": "Fichier invalide", "content": {"application/json": {"example": {"detail": "Le fichier doit être un fichier Excel (.xlsx ou .xls)"}}}},
+        500: {"description": "Erreur de lecture", "content": {"application/json": {"example": {"detail": "Erreur de lecture: Unsupported format"}}}},
+    },
 )
 async def preview_excel_sheets(
     file: UploadFile = File(..., description="Fichier Excel à prévisualiser"),
@@ -131,7 +170,19 @@ async def preview_excel_sheets(
     "/nomenclature",
     summary="Importer la nomenclature",
     description="Importer toutes les feuilles d'un fichier Excel (Nomenclature, Non Renouvelés, Retraits). "
-                "Chaque feuille est automatiquement catégorisée."
+                "Chaque feuille est automatiquement catégorisée.",
+    responses={
+        200: {"description": "Import terminé", "content": {"application/json": {"example": {
+            "version_nomenclature": "2025-06-30",
+            "source_fichier": "nomenclature_2025.xlsx",
+            "sheets_processed": {
+                "Nomenclature": {"rows_inserted": 8500, "rows_updated": 42, "rows_ignored": 3, "category": "NOMENCLATURE", "errors": []},
+            },
+            "total_rows_inserted": 8500, "total_rows_updated": 42,
+            "available_sheets": ["Nomenclature", "Non Renouvelés", "Retraits"],
+        }}}},
+        400: {"description": "Fichier ou feuilles invalides", "content": {"application/json": {"example": {"detail": "Le fichier doit être un fichier Excel (.xlsx ou .xls)"}}}},
+    },
 )
 async def import_nomenclature(
     file: UploadFile = File(..., description="Fichier Excel de nomenclature"),
@@ -327,7 +378,16 @@ async def import_nomenclature(
 @router.get(
     "/duplicates",
     summary="Détecter les doublons",
-    description="Détecter les codes en double dans la base, groupés par code+version+catégorie."
+    description="Détecter les codes en double dans la base, groupés par code+version+catégorie.",
+    responses={
+        200: {"description": "Liste des doublons", "content": {"application/json": {"example": {
+            "total_duplicates": 5,
+            "duplicates": [
+                {"code": "01 A 003", "version": "2025-06-30", "categorie": "NOMENCLATURE", "count": 3},
+                {"code": "02 B 015", "version": "2025-06-30", "categorie": "NOMENCLATURE", "count": 2},
+            ],
+        }}}},
+    },
 )
 async def detect_duplicates(
     version: Optional[str] = None,
@@ -370,7 +430,15 @@ async def detect_duplicates(
     "/clean-duplicates",
     summary="Nettoyer les doublons",
     description="Nettoyer les doublons en gardant une seule entrée par code+version+catégorie. "
-                "Par défaut en mode dry_run (simulation)."
+                "Par défaut en mode dry_run (simulation).",
+    responses={
+        200: {"description": "Résultat du nettoyage", "content": {"application/json": {"example": {
+            "dry_run": True, "total_groups": 5,
+            "total_entries_deleted": 8,
+            "details": [{"code": "01 A 003", "version": "2025-06-30", "categorie": "NOMENCLATURE", "kept": 1, "deleted": 2}],
+        }}}},
+        400: {"description": "Stratégie invalide", "content": {"application/json": {"example": {"detail": "keep_strategy doit être 'latest' ou 'first'"}}}},
+    },
 )
 async def clean_duplicates_endpoint(
     version: Optional[str] = None,

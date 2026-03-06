@@ -67,7 +67,25 @@ def _build_user_out(user: User) -> UserOut:
 
 # ── Login ──────────────────────────────────────────────────────────────────
 
-@router.post("/login", response_model=Token, summary="Se connecter")
+@router.post(
+    "/login",
+    response_model=Token,
+    summary="Se connecter",
+    description="Authentification OAuth2 password flow. Retourne un JWT Bearer token valide 30 minutes.",
+    responses={
+        200: {
+            "description": "Connexion réussie",
+            "content": {"application/json": {"example": {
+                "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbkBub21lbmNsYXR1cmUuZHoiLCJleHAiOjE3NDEyNzI4MDB9.abc123",
+                "token_type": "bearer",
+                "pack": "DEVELOPPEUR",
+                "is_approved": True,
+            }}},
+        },
+        401: {"description": "Email ou mot de passe incorrect", "content": {"application/json": {"example": {"detail": "Email ou mot de passe incorrect"}}}},
+        403: {"description": "Compte désactivé ou en attente", "content": {"application/json": {"example": {"detail": "Compte en attente de validation par un administrateur"}}}},
+    },
+)
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
@@ -104,6 +122,18 @@ async def login(
     response_model=UserOut,
     summary="Mon profil",
     description="Retourne le profil complet de l'utilisateur connecté avec le détail du pack et le quota restant.",
+    responses={
+        200: {"description": "Profil utilisateur", "content": {"application/json": {"example": {
+            "id": 5, "email": "pharmacie.benali@email.dz", "full_name": "Dr. Benali Mehdi",
+            "phone": "+213 555 123 456", "organisation": "Pharmacie Benali - Alger",
+            "is_active": True, "is_approved": True, "pack": "PRO",
+            "role": "user", "requests_today": 42, "requests_month": 890,
+            "created_at": "2026-01-15T08:30:00",
+            "quota_info": {"day_limit": None, "month_limit": None, "remaining_today": None, "remaining_month": None},
+            "pack_detail": {"slug": "PRO", "name": "Pro", "target": "Pharmacies & Grossistes"},
+        }}}},
+        401: {"description": "Non authentifié", "content": {"application/json": {"example": {"detail": "Not authenticated"}}}},
+    },
 )
 async def get_me(current_user: User = Depends(get_current_user)):
     """Profil utilisateur enrichi avec pack info et quota."""
@@ -117,6 +147,10 @@ async def get_me(current_user: User = Depends(get_current_user)):
     response_model=UserOut,
     summary="Modifier mon profil",
     description="Modifier ses informations personnelles (nom, téléphone, organisation).",
+    responses={
+        200: {"description": "Profil mis à jour"},
+        400: {"description": "Aucun champ fourni", "content": {"application/json": {"example": {"detail": "Aucun champ à modifier fourni."}}}},
+    },
 )
 async def update_my_profile(
     data: UpdateProfileRequest,
@@ -152,7 +186,15 @@ async def update_my_profile(
 @router.post(
     "/me/password",
     summary="Changer mon mot de passe",
-    description="Changer son mot de passe en fournissant l'ancien et le nouveau.",
+    description="Changer son mot de passe en fournissant l'ancien et le nouveau. Le nouveau doit faire au moins 8 caractères.",
+    responses={
+        200: {"description": "Mot de passe modifié", "content": {"application/json": {"example": {"message": "Mot de passe modifié avec succès."}}}},
+        400: {"description": "Erreur de validation", "content": {"application/json": {"examples": {
+            "incorrect": {"value": {"detail": "Mot de passe actuel incorrect."}},
+            "trop_court": {"value": {"detail": "Le nouveau mot de passe doit contenir au moins 8 caractères."}},
+            "identique": {"value": {"detail": "Le nouveau mot de passe doit être différent de l'ancien."}},
+        }}}},
+    },
 )
 async def change_my_password(
     data: ChangePasswordRequest,
@@ -199,6 +241,19 @@ async def change_my_password(
     response_model=UserStatsOut,
     summary="Mes statistiques",
     description="Voir ses statistiques d'utilisation : quotas, fonctionnalités accessibles, ancienneté.",
+    responses={
+        200: {"description": "Statistiques utilisateur", "content": {"application/json": {"example": {
+            "email": "pharmacie.benali@email.dz", "full_name": "Dr. Benali Mehdi",
+            "pack": "PRO", "pack_name": "Pro", "organisation": "Pharmacie Benali - Alger",
+            "requests_today": 42, "requests_month": 890,
+            "limit_day": None, "limit_month": None,
+            "remaining_today": None, "remaining_month": None,
+            "is_active": True, "is_approved": True,
+            "account_created": "2026-01-15T08:30:00",
+            "account_age_days": 50,
+            "available_features": ["search", "export_csv", "dci_group", "statistics", "dashboard"],
+        }}}},
+    },
 )
 async def get_my_stats(current_user: User = Depends(get_current_user)):
     """Statistiques détaillées de l'utilisateur connecté."""
@@ -241,6 +296,19 @@ async def get_my_stats(current_user: User = Depends(get_current_user)):
     "/me/pack",
     summary="Détail de mon pack",
     description="Voir le détail complet de son pack actuel (fonctionnalités, limites, cible).",
+    responses={
+        200: {"description": "Détail du pack", "content": {"application/json": {"example": {
+            "current_pack": "PRO",
+            "detail": {
+                "slug": "PRO", "name": "Pro", "target": "Pharmacies & Grossistes",
+                "description": "Officines et grossistes répartiteurs.",
+                "features": ["Recherche par DCI, marque ou code AMM", "Export CSV", "Requêtes illimitées"],
+                "limitations": [], "rate_limit_day": None, "rate_limit_month": None, "requires_approval": True,
+            },
+            "all_packs": ["FREE", "PRO", "INSTITUTIONNEL", "DEVELOPPEUR"],
+            "upgrade_message": None,
+        }}}},
+    },
 )
 async def get_my_pack(current_user: User = Depends(get_current_user)):
     """Détail du pack de l'utilisateur connecté."""
@@ -264,6 +332,14 @@ async def get_my_pack(current_user: User = Depends(get_current_user)):
         "Supprimer définitivement son compte. "
         "Vous devez confirmer avec votre mot de passe et votre email."
     ),
+    responses={
+        200: {"description": "Compte supprimé", "content": {"application/json": {"example": {
+            "message": "Votre compte a été supprimé définitivement.",
+            "email": "pharmacie.benali@email.dz",
+        }}}},
+        400: {"description": "Confirmation invalide", "content": {"application/json": {"example": {"detail": "Mot de passe incorrect."}}}},
+        403: {"description": "Admin interdit", "content": {"application/json": {"example": {"detail": "Un administrateur ne peut pas supprimer son propre compte."}}}},
+    },
 )
 async def delete_my_account(
     data: DeleteAccountRequest,
@@ -309,6 +385,16 @@ async def delete_my_account(
         "Inscription publique. Le compte est créé **en attente de validation** par un administrateur. "
         "Aucun mot de passe n'est requis : il sera généré automatiquement et communiqué après approbation."
     ),
+    responses={
+        201: {"description": "Demande enregistrée", "content": {"application/json": {"example": {
+            "message": "Demande d'accès enregistrée. Un administrateur examinera votre demande. Votre mot de passe vous sera communiqué par email après validation.",
+            "email": "contact@clinique-alger.dz",
+            "full_name": "Dr. Amira Khelifi",
+            "pack_requested": "INSTITUTIONNEL",
+            "status": "pending_approval",
+        }}}},
+        400: {"description": "Email déjà enregistré ou pack invalide", "content": {"application/json": {"example": {"detail": "Cet email est déjà enregistré"}}}},
+    },
 )
 async def public_signup(
     user_data: UserPublicSignup,
@@ -383,6 +469,25 @@ async def public_signup(
     "/me/api-keys",
     summary="Lister mes clés API",
     description="Retourne toutes vos clés API avec leur statut, date de dernière utilisation et compteur.",
+    responses={
+        200: {"description": "Liste des clés API", "content": {"application/json": {"example": {
+            "api_keys": [
+                {
+                    "id": 1,
+                    "name": "Mon App Mobile",
+                    "key_prefix": "npp_a3f7...****",
+                    "is_active": True,
+                    "created_at": "2026-03-01T10:00:00",
+                    "last_used_at": "2026-03-06T14:22:00",
+                    "last_used_ip": "41.111.22.33",
+                    "requests_count": 1523,
+                }
+            ],
+            "total": 1,
+            "max_keys": 3,
+            "remaining_slots": 2,
+        }}}},
+    },
 )
 async def list_my_api_keys(
     current_user: User = Depends(get_current_user),
@@ -427,6 +532,26 @@ async def list_my_api_keys(
         "Génère une nouvelle clé API permanente liée à votre compte et votre pack. "
         "**La clé complète n'est affichée qu'une seule fois** — copiez-la immédiatement."
     ),
+    responses={
+        201: {"description": "Clé API créée", "content": {"application/json": {"example": {
+            "message": "Clé API créée. Copiez-la maintenant — elle ne sera plus affichée.",
+            "api_key": "npp_a3f7e9b2c4d6f8a1e3b5c7d9f0a2b4c6d8e0f1a3b5c7d9",
+            "id": 2,
+            "name": "Mon App Mobile",
+            "key_prefix": "npp_a3f7...****",
+            "pack": "PRO",
+            "created_at": "2026-03-06T15:00:00",
+        }}}},
+        403: {"description": "Limite atteinte", "content": {"application/json": {"example": {
+            "detail": {
+                "error": "api_key_limit_reached",
+                "message": "Limite de 3 clé(s) API atteinte pour le pack PRO.",
+                "current_count": 3,
+                "max_keys": 3,
+                "upgrade_hint": "Contactez un administrateur pour changer de pack.",
+            }
+        }}}},
+    },
 )
 async def create_my_api_key(
     name: str = "Ma clé API",
@@ -497,6 +622,10 @@ async def create_my_api_key(
     "/me/api-keys/{key_id}",
     summary="Révoquer une clé API",
     description="Supprime définitivement l'une de vos clés API.",
+    responses={
+        200: {"description": "Clé révoquée", "content": {"application/json": {"example": {"message": "Clé API révoquée avec succès.", "id": 2}}}},
+        404: {"description": "Clé introuvable", "content": {"application/json": {"example": {"detail": "Clé API introuvable ou ne vous appartient pas."}}}},
+    },
 )
 async def delete_my_api_key(
     key_id: int,

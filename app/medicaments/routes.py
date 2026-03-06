@@ -39,6 +39,13 @@ router = APIRouter(prefix="/medicaments", tags=["Medicaments"])
         "**Pack FREE** : recherche `q`, `dci`, `nom_marque`, `code`, pagination — rate limit 100 req/j.\n\n"
         "**Pack PRO+** : tous les filtres avancés (laboratoire, pays, type, statut, catégorie, dates…)"
     ),
+    responses={
+        200: {"description": "Liste paginée de médicaments", "content": {"application/json": {"example": {
+            "items": [{"id": 1542, "code": "01 A 003", "dci": "CETIRIZINE DICHLORHYDRATE", "nom_marque": "ARTIZ", "forme": "COMPRIME PELLICULE SECABLE", "dosage": "10MG", "conditionnement": "B/10", "laboratoire": "EL KENDI", "pays_laboratoire": "ALGERIE", "type_medicament": "GE", "statut": "F", "categorie": "NOMENCLATURE", "version_nomenclature": "2025-06-30", "created_at": "2026-01-10T09:00:00", "updated_at": "2026-01-10T09:00:00"}],
+            "total": 12345, "page": 1, "page_size": 50, "total_pages": 247, "has_next": True, "has_previous": False,
+        }}}},
+        403: {"description": "Pack insuffisant", "content": {"application/json": {"example": {"detail": "Pack insuffisant. Requis : FREE, PRO, INSTITUTIONNEL ou DEVELOPPEUR."}}}},
+    },
 )
 async def list_medicaments(
     page: int = Query(1, ge=1, description="Numéro de page"),
@@ -89,7 +96,11 @@ async def list_medicaments(
     "/statistiques",
     response_model=MedicamentStatistics,
     summary="Statistiques des médicaments",
-    description="Retourne les statistiques groupées par laboratoire, pays, type, catégorie et statut."
+    description="Retourne les statistiques groupées par laboratoire, pays, type, catégorie et statut.",
+    responses={
+        200: {"description": "Statistiques"},
+        403: {"description": "Pack insuffisant (INSTITUTIONNEL+ requis)", "content": {"application/json": {"example": {"detail": "Pack insuffisant. Requis : INSTITUTIONNEL ou DEVELOPPEUR."}}}},
+    },
 )
 async def get_statistics(
     categorie: Optional[str] = Query(None, description="Filtrer par catégorie"),
@@ -110,7 +121,11 @@ async def get_statistics(
     "/dashboard",
     response_model=DashboardStatistics,
     summary="Dashboard enrichi",
-    description="Statistiques enrichies avec top 10 laboratoires, top 10 pays, versions disponibles."
+    description="Statistiques enrichies avec top 10 laboratoires, top 10 pays, versions disponibles.",
+    responses={
+        200: {"description": "Dashboard complet"},
+        403: {"description": "Pack insuffisant (INSTITUTIONNEL+ requis)", "content": {"application/json": {"example": {"detail": "Pack insuffisant. Requis : INSTITUTIONNEL ou DEVELOPPEUR."}}}},
+    },
 )
 async def get_dashboard(
     db: AsyncSession = Depends(get_db),
@@ -156,7 +171,11 @@ async def export_csv(
     "/par-dci/{dci}",
     response_model=DCIGroupResponse,
     summary="Grouper par DCI",
-    description="Retrouver tous les médicaments (génériques, référence, retraits) d'une même DCI."
+    description="Retrouver tous les médicaments (génériques, référence, retraits) d'une même DCI.",
+    responses={
+        404: {"description": "DCI introuvable", "content": {"application/json": {"example": {"detail": "Aucun médicament trouvé pour la DCI: PARACETAMOL"}}}},
+        403: {"description": "Pack insuffisant (PRO+ requis)"},
+    },
 )
 async def get_by_dci(
     dci: str,
@@ -177,7 +196,10 @@ async def get_by_dci(
     "/{medicament_id}",
     response_model=MedicamentOut,
     summary="Détail d'un médicament",
-    description="Récupérer un médicament par son ID."
+    description="Récupérer un médicament par son ID.",
+    responses={
+        404: {"description": "Médicament non trouvé", "content": {"application/json": {"example": {"detail": "Médicament non trouvé"}}}},
+    },
 )
 async def get_medicament(
     medicament_id: int,
@@ -199,7 +221,11 @@ async def get_medicament(
     response_model=MedicamentOut,
     status_code=status.HTTP_201_CREATED,
     summary="Créer un médicament",
-    description="Créer un nouveau médicament. Requiert le rôle Admin."
+    description="Créer un nouveau médicament. Requiert le rôle Admin.",
+    responses={
+        201: {"description": "Médicament créé"},
+        403: {"description": "Admin requis"},
+    },
 )
 async def create_medicament(
     medicament: MedicamentCreate,
@@ -216,7 +242,11 @@ async def create_medicament(
     "/{medicament_id}",
     response_model=MedicamentOut,
     summary="Mettre à jour un médicament",
-    description="Mettre à jour un médicament existant. Requiert le rôle Admin."
+    description="Mettre à jour un médicament existant. Requiert le rôle Admin.",
+    responses={
+        200: {"description": "Médicament mis à jour"},
+        404: {"description": "Médicament non trouvé", "content": {"application/json": {"example": {"detail": "Médicament non trouvé"}}}},
+    },
 )
 async def update_medicament(
     medicament_id: int,
@@ -239,7 +269,11 @@ async def update_medicament(
     "/{medicament_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Supprimer un médicament",
-    description="Suppression logique (soft delete). Requiert le rôle Admin."
+    description="Suppression logique (soft delete). Requiert le rôle Admin.",
+    responses={
+        204: {"description": "Médicament supprimé"},
+        404: {"description": "Médicament non trouvé", "content": {"application/json": {"example": {"detail": "Médicament non trouvé"}}}},
+    },
 )
 async def delete_medicament(
     medicament_id: int,

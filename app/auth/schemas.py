@@ -16,6 +16,18 @@ class QuotaInfo(BaseModel):
     remaining_month: Optional[int]
     reset_date: str  # ISO date of next daily reset (midnight GMT+1)
 
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "requests_today": 12,
+            "requests_month": 345,
+            "limit_day": 100,
+            "limit_month": 1000,
+            "remaining_today": 88,
+            "remaining_month": 655,
+            "reset_date": "2026-03-06",
+        }
+    })
+
 
 class PackDetail(BaseModel):
     """Detail of a subscription pack."""
@@ -28,6 +40,24 @@ class PackDetail(BaseModel):
     rate_limit_day: Optional[int]
     rate_limit_month: Optional[int]
     requires_approval: bool
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "slug": "PRO",
+            "name": "Pro",
+            "target": "Pharmacies & Grossistes",
+            "description": "Officines et grossistes répartiteurs.",
+            "features": [
+                "Recherche par DCI, marque ou code AMM",
+                "Export CSV pour la gestion de stock",
+                "Requêtes illimitées",
+            ],
+            "limitations": [],
+            "rate_limit_day": None,
+            "rate_limit_month": None,
+            "requires_approval": True,
+        }
+    })
 
 
 # ── User schemas ──────────────────────────────────────────────────────────
@@ -45,6 +75,18 @@ class UserCreate(UserBase):
     organisation: Optional[str] = None
     phone: Optional[str] = None
 
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "email": "pharmacie.benali@email.dz",
+            "password": "SecureP@ss2026!",
+            "full_name": "Dr. Benali Karim",
+            "role": "LECTEUR",
+            "pack": "PRO",
+            "organisation": "Pharmacie Centrale Benali",
+            "phone": "+213 555 123 456",
+        }
+    })
+
 
 class UserPublicSignup(UserBase):
     """Public signup — pending admin approval. No password required."""
@@ -53,6 +95,17 @@ class UserPublicSignup(UserBase):
     phone: Optional[str] = None
     message: Optional[str] = None
     pack: str = "FREE"
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "email": "contact@clinique-alger.dz",
+            "full_name": "Dr. Amira Khelifi",
+            "organisation": "Clinique El Azhar — Alger",
+            "phone": "+213 550 987 654",
+            "message": "Nous souhaitons intégrer la nomenclature dans notre système HIS.",
+            "pack": "INSTITUTIONNEL",
+        }
+    })
 
 
 class UserUpdate(BaseModel):
@@ -66,6 +119,14 @@ class UserUpdate(BaseModel):
     is_approved: Optional[bool] = None
     organisation: Optional[str] = None
     phone: Optional[str] = None
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "pack": "PRO",
+            "is_approved": True,
+            "organisation": "Pharmacie Centrale Benali — Blida",
+        }
+    })
 
 
 class UserOut(UserBase):
@@ -84,7 +145,37 @@ class UserOut(UserBase):
     pack_detail: Optional[PackDetail] = None
     quota: Optional[QuotaInfo] = None
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "id": 3,
+                "email": "pharmacie.benali@email.dz",
+                "full_name": "Dr. Benali Karim",
+                "role": "LECTEUR",
+                "pack": "PRO",
+                "is_active": True,
+                "is_approved": True,
+                "organisation": "Pharmacie Centrale Benali",
+                "phone": "+213 555 123 456",
+                "signup_message": None,
+                "created_at": "2026-02-15T10:30:00",
+                "updated_at": "2026-03-01T14:22:00",
+                "pack_detail": {
+                    "slug": "PRO",
+                    "name": "Pro",
+                    "target": "Pharmacies & Grossistes",
+                    "description": "Officines et grossistes répartiteurs.",
+                    "features": ["Recherche par DCI, marque ou code AMM", "Export CSV", "Requêtes illimitées"],
+                    "limitations": [],
+                    "rate_limit_day": None,
+                    "rate_limit_month": None,
+                    "requires_approval": True,
+                },
+                "quota": None,
+            }
+        },
+    )
 
 
 class UserListOut(UserBase):
@@ -101,7 +192,25 @@ class UserListOut(UserBase):
     requests_month: int
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "id": 3,
+                "email": "pharmacie.benali@email.dz",
+                "full_name": "Dr. Benali Karim",
+                "role": "LECTEUR",
+                "pack": "PRO",
+                "is_active": True,
+                "is_approved": True,
+                "organisation": "Pharmacie Centrale Benali",
+                "phone": "+213 555 123 456",
+                "requests_today": 42,
+                "requests_month": 1250,
+                "created_at": "2026-02-15T10:30:00",
+            }
+        },
+    )
 
 
 # ── Self-service schemas ──────────────────────────────────────────────────
@@ -111,12 +220,27 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "current_password": "AncienMotDePasse123!",
+            "new_password": "NouveauSecure@2026",
+        }
+    })
+
 
 class UpdateProfileRequest(BaseModel):
     """User updates their own profile (limited fields)."""
     full_name: Optional[str] = None
     phone: Optional[str] = None
     organisation: Optional[str] = None
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "full_name": "Dr. Benali Karim",
+            "phone": "+213 555 999 888",
+            "organisation": "Pharmacie Centrale Benali — Blida",
+        }
+    })
 
 
 class UserStatsOut(BaseModel):
@@ -141,11 +265,43 @@ class UserStatsOut(BaseModel):
     # Features
     available_features: List[str]
 
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "email": "pharmacie.benali@email.dz",
+            "full_name": "Dr. Benali Karim",
+            "pack": "PRO",
+            "pack_name": "Pro",
+            "organisation": "Pharmacie Centrale Benali",
+            "requests_today": 42,
+            "requests_month": 1250,
+            "limit_day": None,
+            "limit_month": None,
+            "remaining_today": None,
+            "remaining_month": None,
+            "is_active": True,
+            "is_approved": True,
+            "account_created": "2026-02-15T10:30:00",
+            "account_age_days": 19,
+            "available_features": [
+                "search_basic", "medicament_detail", "filters_advanced",
+                "group_by_dci", "status_enregistrement", "retraits_non_renouveles",
+                "export_csv",
+            ],
+        }
+    })
+
 
 class DeleteAccountRequest(BaseModel):
     """User confirms account deletion with their password."""
     password: str
     confirm_email: EmailStr
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "password": "MonMotDePasse123!",
+            "confirm_email": "pharmacie.benali@email.dz",
+        }
+    })
 
 
 # ── Auth tokens ───────────────────────────────────────────────────────────
@@ -155,10 +311,24 @@ class ApproveRequest(BaseModel):
     pack: str = "FREE"
     password: Optional[str] = None  # If None, auto-generated
 
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "pack": "PRO",
+            "password": None,
+        }
+    })
+
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "email": "admin@nomenclature.dz",
+            "password": "Admin2025!",
+        }
+    })
 
 
 class Token(BaseModel):
@@ -166,4 +336,13 @@ class Token(BaseModel):
     token_type: str = "bearer"
     pack: str = "FREE"
     is_approved: bool = False
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbkBub21lbmNsYXR1cmUuZHoiLCJleHAiOjE3NDEyNzI4MDB9.abc123",
+            "token_type": "bearer",
+            "pack": "DEVELOPPEUR",
+            "is_approved": True,
+        }
+    })
 

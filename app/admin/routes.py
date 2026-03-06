@@ -70,6 +70,17 @@ def _build_user_out(user: User) -> UserOut:
     "/packs",
     summary="Catalogue des packs",
     description="Liste tous les packs disponibles avec leurs fonctionnalités et limites.",
+    responses={
+        200: {"description": "Catalogue complet", "content": {"application/json": {"example": {
+            "packs": [
+                {"slug": "FREE", "name": "Free", "target": "Développeurs & Tests"},
+                {"slug": "PRO", "name": "Pro", "target": "Pharmacies & Grossistes"},
+                {"slug": "INSTITUTIONNEL", "name": "Institutionnel", "target": "Établissements de santé"},
+                {"slug": "DEVELOPPEUR", "name": "Développeur", "target": "Intégrateurs & Partenaires"},
+            ],
+            "total": 4,
+        }}}},
+    },
 )
 async def list_packs(_: User = Depends(get_current_admin)):
     """Catalogue complet des packs."""
@@ -83,6 +94,9 @@ async def list_packs(_: User = Depends(get_current_admin)):
     "/packs/{pack_slug}",
     summary="Détail d'un pack",
     description="Retourne le détail complet d'un pack (fonctionnalités, limites, cible).",
+    responses={
+        404: {"description": "Pack introuvable", "content": {"application/json": {"example": {"detail": "Pack 'GOLD' introuvable. Valeurs : FREE, PRO, INSTITUTIONNEL, DEVELOPPEUR"}}}},
+    },
 )
 async def get_pack_detail(
     pack_slug: str,
@@ -107,6 +121,12 @@ async def get_pack_detail(
     response_model=dict,
     summary="Lister les utilisateurs",
     description="Liste paginée de tous les utilisateurs avec filtre par statut et pack.",
+    responses={
+        200: {"description": "Liste paginée", "content": {"application/json": {"example": {
+            "items": [{"id": 5, "email": "pharmacie.benali@email.dz", "full_name": "Dr. Benali Mehdi", "role": "LECTEUR", "pack": "PRO", "is_active": True, "is_approved": True, "created_at": "2026-01-15T08:30:00"}],
+            "total": 28, "page": 1, "page_size": 50, "total_pages": 1, "pending_approval": 3,
+        }}}},
+    },
 )
 async def list_users(
     page: int = Query(1, ge=1),
@@ -153,6 +173,12 @@ async def list_users(
     "/users/pending",
     summary="Utilisateurs en attente d'approbation",
     description="Liste des inscriptions publiques en attente de validation.",
+    responses={
+        200: {"description": "Utilisateurs en attente", "content": {"application/json": {"example": {
+            "pending": [{"id": 12, "email": "contact@clinique-alger.dz", "full_name": "Dr. Amira Khelifi", "pack": "FREE", "is_approved": False, "created_at": "2026-03-05T14:20:00"}],
+            "total": 3,
+        }}}},
+    },
 )
 async def list_pending_users(
     db: AsyncSession = Depends(get_db),
@@ -173,6 +199,9 @@ async def list_pending_users(
     "/users/{user_id}",
     response_model=UserOut,
     summary="Détail d'un utilisateur",
+    responses={
+        404: {"description": "Utilisateur introuvable", "content": {"application/json": {"example": {"detail": "Utilisateur introuvable"}}}},
+    },
 )
 async def get_user(
     user_id: int,
@@ -193,6 +222,10 @@ async def get_user(
     status_code=status.HTTP_201_CREATED,
     summary="Créer un utilisateur (admin)",
     description="L'admin crée directement un utilisateur approuvé avec le pack de son choix.",
+    responses={
+        201: {"description": "Utilisateur créé"},
+        400: {"description": "Email déjà enregistré ou pack invalide", "content": {"application/json": {"example": {"detail": "Email déjà enregistré"}}}},
+    },
 )
 async def create_user(
     user_data: UserCreate,
@@ -230,6 +263,11 @@ async def create_user(
     response_model=UserOut,
     summary="Modifier un utilisateur",
     description="Mettre à jour rôle, pack, statut actif/approuvé, organisation.",
+    responses={
+        200: {"description": "Utilisateur mis à jour"},
+        404: {"description": "Utilisateur introuvable", "content": {"application/json": {"example": {"detail": "Utilisateur introuvable"}}}},
+        400: {"description": "Rôle ou pack invalide", "content": {"application/json": {"example": {"detail": "Pack invalide : GOLD"}}}},
+    },
 )
 async def update_user(
     user_id: int,
@@ -285,6 +323,18 @@ async def update_user(
         "Approuver un compte en attente. Un mot de passe est généré automatiquement "
         "(ou défini par l'admin) puis renvoyé dans la réponse pour communication à l'utilisateur."
     ),
+    responses={
+        200: {"description": "Utilisateur approuvé", "content": {"application/json": {"example": {
+            "message": "Utilisateur contact@clinique-alger.dz approuvé avec le pack PRO.",
+            "user_id": 12, "email": "contact@clinique-alger.dz",
+            "full_name": "Dr. Amira Khelifi", "pack": "PRO",
+            "generated_password": "xK9#mQ2$vL7&pR4!",
+            "email_sent": True,
+            "note": "Les identifiants ont été envoyés par email.",
+        }}}},
+        400: {"description": "Déjà approuvé", "content": {"application/json": {"example": {"detail": "Utilisateur déjà approuvé"}}}},
+        404: {"description": "Introuvable", "content": {"application/json": {"example": {"detail": "Utilisateur introuvable"}}}},
+    },
 )
 async def approve_user(
     user_id: int,
@@ -344,6 +394,11 @@ async def approve_user(
     response_model=UserOut,
     summary="Changer le pack",
     description="Changer le pack d'abonnement d'un utilisateur. Réinitialise les compteurs FREE.",
+    responses={
+        200: {"description": "Pack modifié"},
+        400: {"description": "Pack invalide", "content": {"application/json": {"example": {"detail": "Pack invalide. Valeurs acceptées : FREE, PRO, INSTITUTIONNEL, DEVELOPPEUR"}}}},
+        404: {"description": "Utilisateur introuvable", "content": {"application/json": {"example": {"detail": "Utilisateur introuvable"}}}},
+    },
 )
 async def change_pack(
     user_id: int,
@@ -388,6 +443,11 @@ async def change_pack(
     "/users/{user_id}",
     summary="Désactiver un utilisateur",
     description="Désactive le compte (soft delete — is_active=False).",
+    responses={
+        200: {"description": "Utilisateur désactivé", "content": {"application/json": {"example": {"message": "Utilisateur pharmacie.benali@email.dz désactivé", "user_id": 5}}}},
+        400: {"description": "Auto-désactivation interdite", "content": {"application/json": {"example": {"detail": "Vous ne pouvez pas désactiver votre propre compte"}}}},
+        404: {"description": "Utilisateur introuvable", "content": {"application/json": {"example": {"detail": "Utilisateur introuvable"}}}},
+    },
 )
 async def deactivate_user(
     user_id: int,
@@ -424,6 +484,13 @@ async def deactivate_user(
     "/stats",
     summary="Statistiques admin",
     description="Résumé des utilisateurs par pack, statut et activité.",
+    responses={
+        200: {"description": "Tableau de bord admin", "content": {"application/json": {"example": {
+            "total_users": 28, "approved": 25, "pending_approval": 3,
+            "active": 26, "inactive": 2,
+            "by_pack": {"FREE": 10, "PRO": 12, "INSTITUTIONNEL": 4, "DEVELOPPEUR": 2},
+        }}}},
+    },
 )
 async def admin_stats(
     db: AsyncSession = Depends(get_db),
@@ -455,6 +522,19 @@ async def admin_stats(
     "/api-keys",
     summary="Lister toutes les clés API",
     description="Vue admin de toutes les clés API avec informations utilisateur, pack et usage.",
+    responses={
+        200: {"description": "Liste paginée des clés API", "content": {"application/json": {"example": {
+            "api_keys": [{
+                "id": 1, "user_id": 5, "user_email": "pharmacie.benali@email.dz",
+                "user_pack": "PRO", "name": "Mon App Mobile",
+                "key_prefix": "npp_a3f7...****", "is_active": True,
+                "created_at": "2026-03-01T10:00:00",
+                "last_used_at": "2026-03-06T14:22:00",
+                "last_used_ip": "41.111.22.33", "requests_count": 1523,
+            }],
+            "total": 15, "page": 1, "page_size": 50,
+        }}}},
+    },
 )
 async def admin_list_api_keys(
     page: int = Query(1, ge=1),
@@ -509,6 +589,17 @@ async def admin_list_api_keys(
     "/api-keys/{key_id}",
     summary="Détail d'une clé API",
     description="Voir le détail complet d'une clé API.",
+    responses={
+        200: {"description": "Détail de la clé", "content": {"application/json": {"example": {
+            "id": 1, "user_id": 5, "user_email": "pharmacie.benali@email.dz",
+            "user_pack": "PRO", "user_full_name": "Dr. Benali Mehdi",
+            "name": "Mon App Mobile", "key_prefix": "npp_a3f7...****",
+            "is_active": True, "created_at": "2026-03-01T10:00:00",
+            "last_used_at": "2026-03-06T14:22:00",
+            "last_used_ip": "41.111.22.33", "requests_count": 1523,
+        }}}},
+        404: {"description": "Clé introuvable", "content": {"application/json": {"example": {"detail": "Clé API introuvable."}}}},
+    },
 )
 async def admin_get_api_key(
     key_id: int,
@@ -544,6 +635,10 @@ async def admin_get_api_key(
     "/api-keys/{key_id}",
     summary="Activer/désactiver une clé API",
     description="L'administrateur peut activer ou désactiver une clé API.",
+    responses={
+        200: {"description": "Clé modifiée", "content": {"application/json": {"example": {"message": "Clé API désactivée.", "id": 1, "is_active": False}}}},
+        404: {"description": "Clé introuvable", "content": {"application/json": {"example": {"detail": "Clé API introuvable."}}}},
+    },
 )
 async def admin_toggle_api_key(
     key_id: int,
@@ -572,6 +667,10 @@ async def admin_toggle_api_key(
     "/api-keys/{key_id}",
     summary="Supprimer une clé API",
     description="Supprime définitivement une clé API.",
+    responses={
+        200: {"description": "Clé supprimée", "content": {"application/json": {"example": {"message": "Clé API supprimée définitivement.", "id": 1}}}},
+        404: {"description": "Clé introuvable", "content": {"application/json": {"example": {"detail": "Clé API introuvable."}}}},
+    },
 )
 async def admin_delete_api_key(
     key_id: int,
@@ -597,6 +696,14 @@ async def admin_delete_api_key(
     "/users/{user_id}/api-keys",
     summary="Clés API d'un utilisateur",
     description="Voir toutes les clés API d'un utilisateur spécifique.",
+    responses={
+        200: {"description": "Clés API de l'utilisateur", "content": {"application/json": {"example": {
+            "user_id": 5, "user_email": "pharmacie.benali@email.dz", "user_pack": "PRO",
+            "api_keys": [{"id": 1, "name": "Mon App Mobile", "key_prefix": "npp_a3f7...****", "is_active": True, "created_at": "2026-03-01T10:00:00", "last_used_at": "2026-03-06T14:22:00", "requests_count": 1523}],
+            "total": 1,
+        }}}},
+        404: {"description": "Utilisateur introuvable", "content": {"application/json": {"example": {"detail": "Utilisateur introuvable."}}}},
+    },
 )
 async def admin_user_api_keys(
     user_id: int,
@@ -647,6 +754,16 @@ async def admin_user_api_keys(
     summary="Statut du service email",
     description="Vérifie la configuration Microsoft 365 Graph API pour l'envoi d'emails.",
     tags=["Administration", "Email"],
+    responses={
+        200: {"description": "Statut de la configuration email", "content": {"application/json": {"example": {
+            "enabled": True, "configured": True, "provider": "Microsoft Graph API",
+            "mail_from": "noreply@forge-solutions.tech",
+            "mail_from_name": "NPP API",
+            "admin_notification_email": "admin@forge-solutions.tech",
+            "tenant_id_set": True, "client_id_set": True, "client_secret_set": True,
+            "templates": ["signup_confirmation", "admin_new_signup", "account_approved", "account_rejected", "password_changed", "password_reset", "api_key_created", "pack_changed", "test_email"],
+        }}}},
+    },
 )
 async def email_status(_: User = Depends(get_current_admin)):
     """État de la configuration email Microsoft 365."""
@@ -688,6 +805,12 @@ async def email_status(_: User = Depends(get_current_admin)):
     summary="Envoyer un email de test",
     description="Envoie un email de test pour vérifier que la configuration M365 fonctionne.",
     tags=["Administration", "Email"],
+    responses={
+        200: {"description": "Résultat de l'envoi", "content": {"application/json": {"examples": {
+            "success": {"value": {"message": "Email de test envoyé à admin@forge-solutions.tech", "success": True}},
+            "failure": {"value": {"message": "Échec de l'envoi. Vérifiez la configuration M365 et les logs.", "success": False, "hint": "Assurez-vous que MAIL_ENABLED=true et que les credentials M365 sont corrects."}},
+        }}}},
+    },
 )
 async def send_test(
     to_email: str = Query(..., description="Adresse email du destinataire"),
@@ -713,6 +836,9 @@ async def send_test(
     summary="Envoyer un email personnalisé",
     description="Envoie un email personnalisé à un utilisateur (corps HTML libre).",
     tags=["Administration", "Email"],
+    responses={
+        200: {"description": "Résultat de l'envoi", "content": {"application/json": {"example": {"success": True, "to": "pharmacie.benali@email.dz", "subject": "Information importante"}}}},
+    },
 )
 async def send_custom_email(
     to_email: str = Query(..., description="Adresse email du destinataire"),
@@ -740,6 +866,14 @@ async def send_custom_email(
         "les nouveaux identifiants par email."
     ),
     tags=["Administration", "Email"],
+    responses={
+        200: {"description": "Mot de passe réinitialisé", "content": {"application/json": {"example": {
+            "message": "Mot de passe réinitialisé pour pharmacie.benali@email.dz",
+            "user_id": 5, "email": "pharmacie.benali@email.dz",
+            "generated_password": "xK9#mQ2$vL7&pR4!", "email_sent": True,
+        }}}},
+        404: {"description": "Utilisateur introuvable", "content": {"application/json": {"example": {"detail": "Utilisateur introuvable"}}}},
+    },
 )
 async def admin_reset_password(
     user_id: int,
